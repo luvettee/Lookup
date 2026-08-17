@@ -5,17 +5,8 @@
       "args": [
         "run",
         "--quiet",
-        "--with",
-        "ollama",
-        "--with",
-        "tavily-python",
         "/Users/bober/Desktop/Lookup/Search.py"
-      ],
-      "env": {
-        "OLLAMA_API_KEY": "your-ollama-api-key",
-        "TAVILY_API_KEY": "your-tavily-api-key",
-        "SEARXNG_URL": "your-searxng-url"
-      }
+      ]
     }
   }
 }
