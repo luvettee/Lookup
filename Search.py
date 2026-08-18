@@ -1,16 +1,21 @@
 import ast
+import base64
 import copy
+import hashlib
 import ipaddress
 import json
+import logging
 import math
 import os
 import re
+import signal
 import socket
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime
@@ -19,14 +24,33 @@ from threading import Lock
 from typing import Any, Callable, Dict, Hashable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 USER_AGENT = f"Lookup-MCP/{VERSION}"
 
+# ---------------- Logging ----------------
+_LOG_LEVEL = os.environ.get("LOOKUP_LOG_LEVEL", "WARNING").upper()
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    level=getattr(logging, _LOG_LEVEL, logging.WARNING),
+    stream=sys.stderr,
+)
+logger = logging.getLogger("lookup")
+
+# ---------------- Global state (thread-safe) ----------------
 OLLAMA_CLIENT: Optional[Any] = None
 TAVILY_CLIENT: Optional[Any] = None
+_OLLAMA_CLIENT_LOCK = Lock()
+_TAVILY_CLIENT_LOCK = Lock()
 CACHE: "OrderedDict[Hashable, Tuple[float, Any]]" = OrderedDict()
+CACHE_LOCK = Lock()
 PROVIDER_HEALTH: Dict[str, Dict[str, Any]] = {}
 HEALTH_LOCK = Lock()
+
+# DNS resolution cache
+_DNS_CACHE: Dict[str, Tuple[float, List[str]]] = {}
+_DNS_CACHE_LOCK = Lock()
+_DNS_CACHE_TTL = 300  # 5 minutes
+_DNS_CACHE_MAX = 512
 
 SEARCH_PROVIDERS: Tuple[str, ...] = ("auto", "brave", "ollama", "tavily", "searxng")
 FETCH_PROVIDERS: Tuple[str, ...] = ("auto", "ollama", "tavily", "direct")
@@ -66,6 +90,20 @@ MAX_JSON_RESPONSE_BYTES = 512_000
 MAX_HTML_RESPONSE_BYTES = 512_000
 MAX_URL_CHARS = 4096
 MAX_QUERY_CHARS = 1000
+MAX_TORRENT_BYTES = 10 * 1024 * 1024
+
+TORRENT_INTENT_RE = re.compile(
+    r"(?i)(?:\b(?:bit(?:\s|-)?torrent|torrent|magnet\s+link|info\s*hash|btih)\b|\.torrent(?:\b|$)|magnet:\?xt=)"
+)
+MAGNET_RE = re.compile(r"magnet:\?[^\s<>\"']+", re.I)
+SIZE_RE = re.compile(r"(?i)\b(\d+(?:\.\d+)?)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)\b")
+SEED_RE = re.compile(r"(?i)\b(?:seeders?|seeds?)\s*[:=]?\s*(\d[\d,]*)")
+LEECH_RE = re.compile(r"(?i)\b(?:leechers?|leeches|peers?)\s*[:=]?\s*(\d[\d,]*)")
+TRUSTED_TORRENT_DOMAINS = {
+    "archive.org", "ubuntu.com", "debian.org", "fedoraproject.org",
+    "linuxmint.com", "opensuse.org", "kali.org", "freebsd.org",
+    "alpinelinux.org", "raspberrypi.com",
+}
 
 WEB_ACTIVITY_WINDOW = 60
 MAX_WEB_ACTIVITY = 5
@@ -87,7 +125,7 @@ WEATHER_CODES = {
 
 TOOLS = {
     "web_search": {
-        "description": "Find webpages about a topic. Use this when you need search results only. Do not repeatedly search the same question; use previous results when available.",
+        "description": "Find webpages about a topic. Natural requests for torrents or magnets automatically include torrent-capable sources and return direct links. Do not repeatedly search the same question; use previous results when available.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -101,7 +139,7 @@ TOOLS = {
         },
     },
     "search_and_fetch": {
-        "description": "Search for a topic and read a few of the best results. Preferred for most web questions. The provider option controls search only; page fetching uses automatic fallback and reports the fetch provider.",
+        "description": "Search for a topic and read a few of the best results. Torrent/magnet requests automatically return validated direct links instead of trying to read binary files. The provider option controls search only; page fetching uses automatic fallback and reports the fetch provider.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -208,10 +246,24 @@ TOOLS = {
             "required": ["value", "from_unit", "to_unit"],
         },
     },
+    "torrent_search": {
+        "description": "Find direct BitTorrent downloads. Returns direct .torrent or magnet links with hash, size, swarm metadata, source, and trust signals when available. Use for natural requests mentioning torrents or magnets.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+                "provider": {"type": "string", "enum": ["auto", "brave", "ollama", "tavily", "searxng"], "default": "auto"},
+                "validate": {"type": "boolean", "default": True},
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 
-def _purge_cache(now: float) -> None:
+def _purge_cache_locked(now: float) -> None:
+    """Evict expired and excess entries. Caller must hold CACHE_LOCK."""
     expired = [key for key, (expires, _) in CACHE.items() if expires <= now]
     for key in expired:
         CACHE.pop(key, None)
@@ -221,19 +273,21 @@ def _purge_cache(now: float) -> None:
 
 def cache_get(key: Hashable) -> Tuple[bool, Any]:
     now = time.monotonic()
-    _purge_cache(now)
-    entry = CACHE.get(key)
-    if entry is None:
-        return False, None
-    CACHE.move_to_end(key)
-    return True, entry[1]
+    with CACHE_LOCK:
+        _purge_cache_locked(now)
+        entry = CACHE.get(key)
+        if entry is None:
+            return False, None
+        CACHE.move_to_end(key)
+        return True, entry[1]
 
 
 def cache_put(key: Hashable, ttl_seconds: int, value: Any) -> Any:
     now = time.monotonic()
-    CACHE[key] = (now + ttl_seconds, value)
-    CACHE.move_to_end(key)
-    _purge_cache(now)
+    with CACHE_LOCK:
+        CACHE[key] = (now + ttl_seconds, value)
+        CACHE.move_to_end(key)
+        _purge_cache_locked(now)
     return value
 
 
@@ -281,6 +335,7 @@ def _health_success(name: str, latency: float) -> None:
 
 def _health_failure(name: str, exc: Exception) -> None:
     reason, cooldown = _failure_kind(exc)
+    logger.debug("Provider %s failed (%s): %s — cooldown %ds", name, reason, concise(exc), cooldown)
     with HEALTH_LOCK:
         previous = PROVIDER_HEALTH.get(name, {})
         PROVIDER_HEALTH[name] = {
@@ -417,6 +472,26 @@ def _allow_private_urls() -> bool:
     return os.environ.get("LOOKUP_ALLOW_PRIVATE_URLS", "").lower() in ("1", "true", "yes")
 
 
+def _resolve_host(host: str, port: int) -> List[str]:
+    """Resolve a hostname to IP addresses, with a short-lived cache."""
+    now = time.monotonic()
+    with _DNS_CACHE_LOCK:
+        entry = _DNS_CACHE.get(host)
+        if entry and now < entry[0]:
+            return list(entry[1])
+    try:
+        addresses = list({item[4][0] for item in socket.getaddrinfo(
+            host, port, type=socket.SOCK_STREAM)})
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("URL hostname could not be resolved") from exc
+    with _DNS_CACHE_LOCK:
+        if len(_DNS_CACHE) >= _DNS_CACHE_MAX:
+            oldest = min(_DNS_CACHE, key=lambda k: _DNS_CACHE[k][0])
+            _DNS_CACHE.pop(oldest, None)
+        _DNS_CACHE[host] = (now + _DNS_CACHE_TTL, addresses)
+    return addresses
+
+
 def validate_url(raw: Any, resolve_dns: bool = True) -> str:
     if not isinstance(raw, str):
         raise ValueError("url must be a string")
@@ -445,12 +520,7 @@ def validate_url(raw: Any, resolve_dns: bool = True) -> str:
         addresses.append(str(ipaddress.ip_address(host)))
     except ValueError:
         if resolve_dns:
-            try:
-                addresses.extend({item[4][0] for item in socket.getaddrinfo(
-                    host, port,
-                    type=socket.SOCK_STREAM)})
-            except (OSError, UnicodeError) as exc:
-                raise ValueError("URL hostname could not be resolved") from exc
+            addresses.extend(_resolve_host(host, port))
     for address in addresses:
         try:
             ip = ipaddress.ip_address(address)
@@ -539,11 +609,15 @@ def get_ollama_client() -> Any:
     require_ollama_api_key()
     if OLLAMA_CLIENT is not None:
         return OLLAMA_CLIENT
-    try:
-        from ollama import Client
-    except ImportError as exc:
-        raise ValueError("ollama package not installed") from exc
-    OLLAMA_CLIENT = Client()
+    with _OLLAMA_CLIENT_LOCK:
+        if OLLAMA_CLIENT is not None:  # double-checked locking
+            return OLLAMA_CLIENT
+        try:
+            from ollama import Client
+        except ImportError as exc:
+            raise ValueError("ollama package not installed") from exc
+        OLLAMA_CLIENT = Client()
+        logger.debug("Initialized Ollama client")
     return OLLAMA_CLIENT
 
 
@@ -551,14 +625,18 @@ def get_tavily_client() -> Any:
     global TAVILY_CLIENT
     if TAVILY_CLIENT is not None:
         return TAVILY_CLIENT
-    api_key = os.environ.get("TAVILY_API_KEY")
-    if not api_key:
-        raise ValueError("Tavily API key not configured")
-    try:
-        from tavily import TavilyClient
-    except ImportError as exc:
-        raise ValueError("tavily-python not installed") from exc
-    TAVILY_CLIENT = TavilyClient(api_key=api_key)
+    with _TAVILY_CLIENT_LOCK:
+        if TAVILY_CLIENT is not None:  # double-checked locking
+            return TAVILY_CLIENT
+        api_key = os.environ.get("TAVILY_API_KEY")
+        if not api_key:
+            raise ValueError("Tavily API key not configured")
+        try:
+            from tavily import TavilyClient
+        except ImportError as exc:
+            raise ValueError("tavily-python not installed") from exc
+        TAVILY_CLIENT = TavilyClient(api_key=api_key)
+        logger.debug("Initialized Tavily client")
     return TAVILY_CLIENT
 
 
@@ -603,10 +681,10 @@ def _truncate(text: str, max_chars: int) -> str:
         return text
     cut = text[:max_chars]
     boundary = None
-    for sep in ("\n\n", "\n", ". "):
+    for sep in ("\n\n", ".\n", "\n", ". ", "! ", "? ", ".\""):
         idx = cut.rfind(sep)
         if idx >= int(max_chars * 0.5):
-            boundary = idx
+            boundary = idx + len(sep)
             break
     if boundary is not None:
         cut = cut[:boundary]
@@ -838,6 +916,19 @@ def _resolve_links(raw_links: List[Dict[str, Any]], base_url: str) -> List[Dict[
             continue
         if href.startswith(("javascript:", "mailto:", "tel:", "data:", "ftp:")):
             continue
+        if href.lower().startswith("magnet:"):
+            try:
+                magnet = parse_magnet(href)
+            except ValueError:
+                continue
+            canonical = "magnet:" + magnet["info_hash"]
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            links.append({"text": text, "url": magnet["url"]})
+            if len(links) >= 50:
+                break
+            continue
         resolved = urllib.parse.urljoin(base_url, href)
         if not resolved.startswith(("http://", "https://")):
             continue
@@ -914,24 +1005,27 @@ def _fetch_provider(provider: str, url: str, max_chars: int) -> Dict[str, Any]:
     url = validate_url(url, resolve_dns=False)
     if provider == "auto":
         errors: Dict[str, str] = {}
-        if os.environ.get("OLLAMA_API_KEY"):
+        if os.environ.get("OLLAMA_API_KEY") and _health_available("fetch:ollama"):
             try:
-                return _fetch_ollama(url, max_chars)
+                return _attempt_provider("fetch:ollama", lambda: _fetch_ollama(url, max_chars))
             except Exception as exc:
                 errors["Ollama"] = concise(exc)
+                logger.debug("Ollama fetch failed: %s", concise(exc))
         else:
-            errors["Ollama"] = "API key not configured"
-        if os.environ.get("TAVILY_API_KEY"):
+            errors["Ollama"] = "API key not configured" if not os.environ.get("OLLAMA_API_KEY") else "cooling down"
+        if os.environ.get("TAVILY_API_KEY") and _health_available("fetch:tavily"):
             try:
-                return _fetch_tavily(url, max_chars)
+                return _attempt_provider("fetch:tavily", lambda: _fetch_tavily(url, max_chars))
             except Exception as exc:
                 errors["Tavily"] = concise(exc)
+                logger.debug("Tavily fetch failed: %s", concise(exc))
         else:
-            errors["Tavily"] = "API key not configured"
+            errors["Tavily"] = "API key not configured" if not os.environ.get("TAVILY_API_KEY") else "cooling down"
         try:
             return direct_fetch(url, max_chars)
         except Exception as exc:
             errors["Direct"] = concise(exc)
+            logger.debug("Direct fetch failed: %s", concise(exc))
         raise ValueError(provider_fail_msg("fetch providers", errors))
     if provider == "ollama":
         return _fetch_ollama(url, max_chars)
@@ -1461,6 +1555,7 @@ def _do_search(provider: str, query: str, count: int, domain: str,
         return normalize_results(name, query, payload, count)
 
     if provider == "auto":
+        logger.debug("Auto search: query=%r", query[:80])
         errors: Dict[str, str] = {}
         empty_providers: List[str] = []
         if os.environ.get("OLLAMA_API_KEY"):
@@ -1532,53 +1627,602 @@ def _collect_sources(search_result: Dict[str, Any], limit: int) -> List[Dict[str
 
 def _read_sources(results: List[Dict[str, Any]], max_chars: int,
                   total_budget: int = MAX_TOOL_OUTPUT_CHARS) -> List[Dict[str, Any]]:
-    sources = []
-    used = 0
-    for r in results:
-        if used >= total_budget:
-            break
+    if not results:
+        return []
+    # Divide the total budget evenly across sources so all fetches can start at once.
+    per_source = max(300, min(max_chars, (total_budget - 200) // len(results)))
+
+    def fetch_one(r: Dict[str, Any]) -> Dict[str, Any]:
         url = r.get("url", "")
         title = r.get("title", "")
         snippet = r.get("snippet", "")
-        remaining = total_budget - used
-        per = min(max_chars, remaining - 200)
-        if per < 300:
-            break
         try:
-            data = _fetch_provider("auto", url, per)
-            content = data.get("content", "")
-            sources.append({
+            data = _fetch_provider("auto", url, per_source)
+            return {
                 "title": data.get("title") or title,
                 "url": data.get("final_url") or url,
                 "snippet": snippet,
-                "content": content,
+                "content": data.get("content", ""),
                 "fetch_provider": data.get("provider", "unknown"),
-            })
-            used += len(content) + len(title) + len(snippet) + 30
+            }
         except Exception as exc:
-            sources.append({"url": url, "error": _fetch_error(exc)})
-            used += len(url) + 30
-    return sources
+            logger.debug("Fetch failed for %s: %s", url, concise(exc))
+            return {"url": url, "error": _fetch_error(exc)}
+
+    if len(results) == 1:
+        return [fetch_one(results[0])]
+    with ThreadPoolExecutor(max_workers=min(len(results), 4),
+                            thread_name_prefix="lookup-fetch") as executor:
+        return list(executor.map(fetch_one, results))
+
+
+# ---------------- BitTorrent helpers ----------------
+
+def is_torrent_query(query: Any) -> bool:
+    """Return whether a natural-language request explicitly asks for BitTorrent."""
+    return isinstance(query, str) and bool(TORRENT_INTENT_RE.search(query))
+
+
+def parse_magnet(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, str):
+        raise ValueError("magnet link must be a string")
+    link = raw.strip().rstrip(".,;)")
+    if len(link) > MAX_URL_CHARS:
+        raise ValueError("magnet link is too long")
+    parsed = urllib.parse.urlparse(link)
+    if parsed.scheme.lower() != "magnet":
+        raise ValueError("link must use the magnet scheme")
+    params = urllib.parse.parse_qs(parsed.query, keep_blank_values=False)
+    exact_topics = params.get("xt", [])
+    btih = next((value[9:] for value in exact_topics
+                 if value.lower().startswith("urn:btih:")), "")
+    if re.fullmatch(r"[0-9a-fA-F]{40}", btih):
+        info_hash = btih.lower()
+    elif re.fullmatch(r"[A-Z2-7a-z2-7]{32}", btih):
+        try:
+            info_hash = base64.b32decode(btih.upper()).hex()
+        except Exception as exc:
+            raise ValueError("magnet link has an invalid BTIH hash") from exc
+    else:
+        raise ValueError("magnet link must contain a 40-hex or 32-base32 BTIH hash")
+    return {
+        "type": "magnet",
+        "url": link,
+        "info_hash": info_hash,
+        "name": (params.get("dn") or [""])[0],
+        "trackers": params.get("tr", []),
+        "valid": True,
+    }
+
+
+def _bdecode(data: bytes, index: int = 0, depth: int = 0) -> Tuple[Any, int]:
+    if depth > 64 or index >= len(data):
+        raise ValueError("invalid torrent metainfo")
+    marker = data[index:index + 1]
+    if marker == b"i":
+        end = data.find(b"e", index + 1)
+        if end < 0:
+            raise ValueError("invalid torrent integer")
+        token = data[index + 1:end]
+        if not re.fullmatch(rb"-?(?:0|[1-9]\d*)", token):
+            raise ValueError("invalid torrent integer")
+        return int(token), end + 1
+    if marker == b"l":
+        values, index = [], index + 1
+        while data[index:index + 1] != b"e":
+            value, index = _bdecode(data, index, depth + 1)
+            values.append(value)
+        return values, index + 1
+    if marker == b"d":
+        values: Dict[bytes, Any] = {}
+        index += 1
+        while data[index:index + 1] != b"e":
+            key, index = _bdecode(data, index, depth + 1)
+            if not isinstance(key, bytes):
+                raise ValueError("invalid torrent dictionary key")
+            value, index = _bdecode(data, index, depth + 1)
+            values[key] = value
+        return values, index + 1
+    colon = data.find(b":", index, min(len(data), index + 24))
+    if colon < 0 or not data[index:colon].isdigit():
+        raise ValueError("invalid torrent string")
+    length = int(data[index:colon])
+    start, end = colon + 1, colon + 1 + length
+    if length < 0 or end > len(data):
+        raise ValueError("invalid torrent string length")
+    return data[start:end], end
+
+
+def parse_torrent(data: bytes) -> Dict[str, Any]:
+    """Validate metainfo and hash the original (not re-encoded) info dictionary."""
+    if not isinstance(data, bytes) or not data or len(data) > MAX_TORRENT_BYTES:
+        raise ValueError("torrent file is empty or too large")
+    if data[:1] != b"d":
+        raise ValueError("torrent metainfo must be a bencoded dictionary")
+    root: Dict[bytes, Any] = {}
+    info_span: Optional[Tuple[int, int]] = None
+    index = 1
+    while data[index:index + 1] != b"e":
+        key, index = _bdecode(data, index, 1)
+        if not isinstance(key, bytes):
+            raise ValueError("invalid torrent dictionary key")
+        value_start = index
+        value, index = _bdecode(data, index, 1)
+        root[key] = value
+        if key == b"info":
+            info_span = (value_start, index)
+    if index + 1 != len(data) or info_span is None:
+        raise ValueError("torrent metainfo has no valid info dictionary")
+    info = root.get(b"info")
+    if not isinstance(info, dict):
+        raise ValueError("torrent info must be a dictionary")
+    name_bytes = info.get(b"name.utf-8") or info.get(b"name") or b""
+    name = name_bytes.decode("utf-8", errors="replace") if isinstance(name_bytes, bytes) else ""
+    if isinstance(info.get(b"length"), int):
+        size = max(0, info[b"length"])
+    else:
+        files = info.get(b"files")
+        size = sum(max(0, item.get(b"length", 0)) for item in files
+                   if isinstance(item, dict) and isinstance(item.get(b"length"), int)) \
+            if isinstance(files, list) else 0
+    start, end = info_span
+    return {
+        "type": "torrent",
+        "info_hash": hashlib.sha1(data[start:end]).hexdigest(),
+        "name": name,
+        "size_bytes": size,
+        "valid": True,
+    }
+
+
+def _source_domain(url: str) -> str:
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _trusted_torrent_source(url: str) -> bool:
+    host = _source_domain(url)
+    return any(host == domain or host.endswith("." + domain)
+               for domain in TRUSTED_TORRENT_DOMAINS)
+
+
+def _number_match(pattern: Any, text: str) -> Optional[int]:
+    match = pattern.search(text)
+    return int(match.group(1).replace(",", "")) if match else None
+
+
+def _size_match(text: str) -> Optional[str]:
+    match = SIZE_RE.search(text)
+    return f"{match.group(1)} {match.group(2)}" if match else None
+
+
+def _candidate(link: str, title: str, source_url: str, text: str = "",
+               extra: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    try:
+        if link.lower().startswith("magnet:"):
+            parsed = parse_magnet(link)
+        else:
+            parsed = {"type": "torrent", "url": validate_url(link, resolve_dns=False)}
+    except ValueError:
+        return None
+    result: Dict[str, Any] = {
+        "name": parsed.get("name") or title or os.path.basename(
+            urllib.parse.urlparse(link).path),
+        "url": parsed["url"],
+        "type": parsed["type"],
+        "source": _source_domain(source_url) or source_url,
+        "source_url": source_url,
+        "trusted": _trusted_torrent_source(source_url),
+        "verified": bool(_trusted_torrent_source(source_url)),
+        "validation": "magnet_syntax" if parsed["type"] == "magnet" else "not_checked",
+    }
+    if parsed.get("info_hash"):
+        result["info_hash"] = parsed["info_hash"]
+    size = _size_match(text)
+    seeders, leechers = _number_match(SEED_RE, text), _number_match(LEECH_RE, text)
+    if size:
+        result["size"] = size
+    if seeders is not None:
+        result["seeders"] = seeders
+    if leechers is not None:
+        result["leechers"] = leechers
+    if extra:
+        result.update({key: value for key, value in extra.items() if value is not None})
+    return result
+
+
+def _torrent_links_in_text(text: str) -> List[str]:
+    links = [match.group(0) for match in MAGNET_RE.finditer(text or "")]
+    links.extend(re.findall(r"https?://[^\s<>\"']+?\.torrent(?:\?[^\s<>\"']*)?",
+                            text or "", flags=re.I))
+    return list(dict.fromkeys(link.rstrip(".,;)") for link in links))
+
+
+def _torrent_site_definitions() -> List[Dict[str, Any]]:
+    """Return torrent indexer-site definitions.
+
+    Lookup deliberately does not depend on any one site or API. Each definition
+    is just a search-URL template containing a ``{query}`` placeholder (plus an
+    optional ``slug`` mode for sites whose paths want kebab-case words). Any
+    site meeting that shape can be added, and extra templates can also be
+    supplied through ``TORRENT_SITE_URLS`` at runtime.
+    """
+    defaults: List[Dict[str, Any]] = [
+        {
+            "name": "1337x",
+            "base": "https://www.1337x.tw",
+            "search": "https://www.1337x.tw/search/{query}/1/",
+            "slug": False,
+        },
+        {
+            "name": "YTS",
+            "base": "https://yts.proxyninja.org",
+            "search": "https://yts.proxyninja.org/browse-movies/{query}/all/all/0/latest/latest/0/",
+            "slug": True,
+        },
+        {
+            "name": "ThePirateBay",
+            "base": "https://thepiratebay.org",
+            "search": "https://thepiratebay.org/search/{query}/1/99/0",
+            "slug": True,
+        },
+        {
+            "name": "EZTV",
+            "base": "https://eztvx.to",
+            "search": "https://eztvx.to/search/{query}",
+            "slug": True,
+        },
+        {
+            "name": "LimeTorrents",
+            "base": "https://www.limetorrents.lol",
+            "search": "https://www.limetorrents.lol/search/all/{query}",
+            "slug": True,
+        },
+        {
+            "name": "Nyaa",
+            "base": "https://nyaa.si",
+            "search": "https://nyaa.si/?f=0&c=0_0&q={query}",
+            "slug": False,
+        },
+    ]
+    configured = [item.strip() for item in os.environ.get("TORRENT_SITE_URLS", "").split(",")
+                  if item.strip()]
+    definitions: List[Dict[str, Any]] = []
+    for template in configured:
+        if "{query}" not in template:
+            continue
+        host = _source_domain(template)
+        definitions.append({
+            "name": host or "torrent-site",
+            "base": f"https://{host}" if host else template,
+            "search": template,
+            "slug": False,
+        })
+    definitions.extend(defaults)
+    return definitions
+
+
+def _same_site(url: str, base: str) -> bool:
+    url_domain = _source_domain(url)
+    base_domain = _source_domain(base)
+    return bool(url_domain and url_domain == base_domain)
+
+
+def _looks_like_detail(url: str, base: str) -> bool:
+    try:
+        path = urllib.parse.urlparse(url).path
+    except ValueError:
+        return False
+    lower = path.lower()
+    if lower.startswith(("/search/", "/search", "/browse-movies/", "/browse/")):
+        return False
+    return len(path.strip("/").split("/")) >= 2
+
+
+def _torrent_site_search(query: str, count: int) -> List[Dict[str, Any]]:
+    """Scrape torrent candidates from every configured indexer-style site."""
+    results: List[Dict[str, Any]] = []
+    query_slug = re.sub(r"[^a-z0-9]+", "-", query.lower()).strip("-") or query.lower()
+    for site in _torrent_site_definitions():
+        rendered = query_slug if site.get("slug") else urllib.parse.quote_plus(query)
+        search_url = site["search"].replace("{query}", rendered)
+        try:
+            page = direct_fetch(search_url, 40_000)
+        except Exception as exc:
+            logger.debug("Torrent site search failed for %s: %s", site["name"], concise(exc))
+            continue
+        results.extend(_torrent_site_candidates(site, search_url, page, count))
+        if len(results) >= count * 2:
+            break
+    return _dedupe_torrents(results, count * 2)
+
+
+def _torrent_site_candidates(site: Dict[str, Any], search_url: str,
+                             page: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
+    base = str(site["base"])
+    title = str(page.get("title") or "")
+    page_text = " ".join((title,
+                          str(page.get("description") or ""),
+                          str(page.get("content") or "")))
+    links = [link for link in (page.get("links") or []) if isinstance(link, dict)]
+    results: List[Dict[str, Any]] = []
+    detail_urls: List[Tuple[str, str]] = []
+
+    for link in links:
+        url = str(link.get("url") or "")
+        text = str(link.get("text") or "").strip()
+        if url.lower().startswith("magnet:") or url.lower().split("?", 1)[0].endswith(".torrent"):
+            candidate = _candidate(url, text or title, search_url, page_text)
+            if candidate:
+                results.append(candidate)
+        elif _same_site(url, base) and _looks_like_detail(url, base):
+            detail_urls.append((text, url))
+
+    for url in _torrent_links_in_text(page_text):
+        if not url.lower().startswith("magnet:"):
+            continue
+        candidate = _candidate(url, title, search_url, page_text)
+        if candidate:
+            results.append(candidate)
+
+    visited: set = set()
+    for text, url in detail_urls:
+        if len(results) >= limit:
+            break
+        if url in visited:
+            continue
+        visited.add(url)
+        try:
+            detail_page = direct_fetch(url, 30_000)
+        except Exception as exc:
+            logger.debug("Torrent detail page fetch failed for %s: %s", url, concise(exc))
+            continue
+        detail_text = " ".join((str(detail_page.get("title") or ""),
+                                str(detail_page.get("description") or ""),
+                                str(detail_page.get("content") or "")))
+        for detail_link in _torrent_links_in_text(detail_text):
+            candidate = _candidate(detail_link, text or str(detail_page.get("title") or ""),
+                                   url, detail_text)
+            if candidate:
+                results.append(candidate)
+    return results[:limit]
+
+
+def _torznab_search(query: str, count: int) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    configured = [item.strip() for item in os.environ.get("TORZNAB_URLS", "").split(",")
+                  if item.strip()]
+    for endpoint in configured:
+        separator = "&" if "?" in endpoint else "?"
+        url = endpoint + separator + urllib.parse.urlencode({"t": "search", "q": query, "limit": count})
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT,
+                                                       "Accept": "application/xml"})
+        try:
+            with _open_public(request, NETWORK_TIMEOUT) as response:
+                raw = response.read(MAX_JSON_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_JSON_RESPONSE_BYTES:
+                raise ValueError("Torznab response is too large")
+            root = ET.fromstring(raw)
+            for item in root.findall(".//item"):
+                title = item.findtext("title") or ""
+                enclosure = item.find("enclosure")
+                link = (enclosure.get("url") if enclosure is not None else None) or item.findtext("link") or ""
+                attrs = {node.get("name", ""): node.get("value")
+                         for node in item.findall(".//{*}attr")}
+                link = attrs.get("magneturl") or link
+                candidate = _candidate(link, title, endpoint, title, {
+                    "size_bytes": int(attrs["size"]) if str(attrs.get("size", "")).isdigit() else None,
+                    "seeders": int(attrs["seeders"]) if str(attrs.get("seeders", "")).isdigit() else None,
+                    "leechers": max(0, int(attrs["peers"]) - int(attrs.get("seeders", 0)))
+                    if str(attrs.get("peers", "")).isdigit() else None,
+                })
+                if candidate:
+                    candidate["source"] = _source_domain(endpoint) or "Torznab"
+                    candidate["verified"] = attrs.get("downloadvolumefactor") == "0"
+                    results.append(candidate)
+        except Exception as exc:
+            logger.debug("Torznab search failed for %s: %s", endpoint, concise(exc))
+    return results[:count]
+
+
+def _internet_archive_torrents(query: str, count: int) -> List[Dict[str, Any]]:
+    params = urllib.parse.urlencode({
+        "q": f"({query}) AND mediatype:(software OR texts OR audio OR movies)",
+        "fl[]": ["identifier", "title", "item_size"], "rows": count,
+        "page": 1, "output": "json",
+    }, doseq=True)
+    try:
+        payload = get_json(f"https://archive.org/advancedsearch.php?{params}")
+    except Exception as exc:
+        logger.debug("Internet Archive torrent search failed: %s", concise(exc))
+        return []
+    docs = _mapping(payload.get("response")).get("docs") or []
+    results: List[Dict[str, Any]] = []
+    for doc in docs:
+        if not isinstance(doc, dict) or not doc.get("identifier"):
+            continue
+        identifier = str(doc["identifier"])
+        item_url = f"https://archive.org/details/{urllib.parse.quote(identifier)}"
+        torrent_url = (f"https://archive.org/download/{urllib.parse.quote(identifier)}/"
+                       f"{urllib.parse.quote(identifier)}_archive.torrent")
+        result = _candidate(torrent_url, str(doc.get("title") or identifier), item_url,
+                            extra={"size_bytes": doc.get("item_size")})
+        if result:
+            # Archive.org hosts user uploads; host trust does not prove content provenance.
+            result["trusted"] = True
+            result["verified"] = False
+            result["trust_note"] = "Trusted host; uploader/content not independently verified"
+            results.append(result)
+    return results
+
+
+def _validate_torrent_candidate(result: Dict[str, Any]) -> Dict[str, Any]:
+    if result.get("type") == "magnet":
+        result["validation"] = "valid_syntax_and_info_hash"
+        return result
+    request = urllib.request.Request(result["url"], headers={
+        "User-Agent": USER_AGENT,
+        "Accept": "application/x-bittorrent, application/octet-stream;q=0.8",
+    })
+    try:
+        with _open_public(request, NETWORK_TIMEOUT) as response:
+            if (_declared_length(response) or 0) > MAX_TORRENT_BYTES:
+                raise ValueError("torrent file is too large")
+            data = response.read(MAX_TORRENT_BYTES + 1)
+        metadata = parse_torrent(data)
+        result.update({key: value for key, value in metadata.items()
+                       if key in ("info_hash", "name", "size_bytes") and value})
+        result["validation"] = "valid_torrent_metainfo"
+    except Exception as exc:
+        result["validation"] = "unverified"
+        result["validation_error"] = concise(exc)
+    return result
+
+
+def _torrent_candidates_from_page(item: Dict[str, Any]) -> List[Dict[str, Any]]:
+    page_url = str(item.get("url") or "")
+    if not page_url or page_url.lower().split("?", 1)[0].endswith(".torrent"):
+        return []
+    try:
+        page = direct_fetch(page_url, 12000)
+    except Exception as exc:
+        logger.debug("Torrent result page fetch failed for %s: %s", page_url, concise(exc))
+        return []
+    found: List[Dict[str, Any]] = []
+    page_text = " ".join((str(page.get("title") or ""),
+                          str(page.get("description") or ""),
+                          str(page.get("content") or "")))
+    page_links = [str(link.get("url") or "") for link in page.get("links", [])
+                  if isinstance(link, dict)]
+    for link in list(dict.fromkeys(page_links + _torrent_links_in_text(page_text))):
+        if not (link.lower().startswith("magnet:") or
+                link.lower().split("?", 1)[0].endswith(".torrent")):
+            continue
+        candidate = _candidate(link, str(page.get("title") or item.get("title") or ""),
+                               page_url, page_text)
+        if candidate:
+            found.append(candidate)
+    return found
+
+
+def _dedupe_torrents(results: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    seen_hashes, seen_urls, unique = set(), set(), []
+    for result in results:
+        info_hash = str(result.get("info_hash") or "").lower()
+        url_key = str(result.get("url") or "").lower()
+        if (info_hash and info_hash in seen_hashes) or url_key in seen_urls:
+            continue
+        if info_hash:
+            seen_hashes.add(info_hash)
+        seen_urls.add(url_key)
+        unique.append(result)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+def _rank_torrents(results: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    terms = [term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) > 2]
+
+    def score(result: Dict[str, Any]) -> Tuple[int, int, int, int, int]:
+        text = " ".join((str(result.get("name") or ""),
+                         str(result.get("source") or ""))).lower()
+        relevance = sum(1 for term in terms if term in text)
+        validation = 1 if str(result.get("validation", "")).startswith("valid") else 0
+        swarm = int(result.get("seeders") or 0)
+        # Keep relevant matches on top, then prefer well-seeded, free,
+        # validated results ahead of trusted-flag and verification signals.
+        return (relevance, swarm, validation,
+                1 if result.get("trusted") else 0,
+                1 if result.get("verified") else 0)
+
+    return sorted(results, key=score, reverse=True)
+
+
+def torrent_search(args: Dict[str, Any]) -> Dict[str, Any]:
+    query, provider, _, scope = _validate_search_args(args)
+    count = clamp(args.get("max_results", 5), 1, 20)
+    should_validate = bool_arg(args, "validate", True)
+    _check_search_guard(scope, "torrent_search", query)
+    clean_query = re.sub(r"(?i)\b(?:find|search|download|get|me|for|a|an|the|torrent|magnet|link)\b",
+                         " ", query)
+    clean_query = " ".join(clean_query.split()) or query
+    candidates = _torznab_search(clean_query, count)
+    candidates.extend(_torrent_site_search(clean_query, count))
+    candidates.extend(_internet_archive_torrents(clean_query, count))
+    try:
+        normal = _do_search(provider, f"{clean_query} torrent", count * 2, "", None)
+        for item in normal.get("results", []):
+            text = " ".join((str(item.get("url") or ""), str(item.get("snippet") or "")))
+            for link in _torrent_links_in_text(text):
+                candidate = _candidate(link, str(item.get("title") or ""),
+                                       str(item.get("url") or link), text)
+                if candidate:
+                    candidates.append(candidate)
+            item_url = str(item.get("url") or "")
+            if item_url.lower().split("?", 1)[0].endswith(".torrent"):
+                candidate = _candidate(item_url, str(item.get("title") or ""), item_url, text)
+                if candidate:
+                    candidates.append(candidate)
+        crawl_items = normal.get("results", [])[:min(4, count)]
+        if crawl_items:
+            with ThreadPoolExecutor(max_workers=min(4, len(crawl_items)),
+                                    thread_name_prefix="lookup-torrent-pages") as executor:
+                for page_candidates in executor.map(_torrent_candidates_from_page, crawl_items):
+                    candidates.extend(page_candidates)
+    except Exception as exc:
+        logger.debug("Normal search portion of torrent search failed: %s", concise(exc))
+    candidates = _dedupe_torrents(candidates, max(1, len(candidates)))
+    candidates = _rank_torrents(candidates, clean_query)[:count * 2]
+    if should_validate and candidates:
+        with ThreadPoolExecutor(max_workers=min(4, len(candidates)),
+                                thread_name_prefix="lookup-torrent-validate") as executor:
+            candidates = list(executor.map(_validate_torrent_candidate, candidates))
+    candidates = _rank_torrents(_dedupe_torrents(candidates, count * 2), clean_query)[:count]
+    return enforce_output_budget({
+        "query": query,
+        "torrent_intent": True,
+        "results": candidates,
+    })
 
 
 # ---------------- Tools ----------------
 
-def web_search(args: Dict[str, Any]) -> Any:
+def _validate_search_args(args: Dict[str, Any]) -> Tuple[str, str, Optional[str], str]:
+    """Validate common search arguments. Returns (query, provider, recency, scope)."""
     query = _validate_query(args.get("query"))
     provider = validate_provider(string_arg(args, "provider", "auto") or "auto", SEARCH_PROVIDERS)
-    count = clamp(args.get("max_results", 5), 1, 20)
-    domain = string_arg(args, "domain")
     recency = string_arg(args, "recency").lower() or None
     if recency and recency not in RECENCY_DAYS:
         raise ValueError("recency must be one of: day, week, month, year")
+    scope = _activity_scope(args)
+    return query, provider, recency, scope
+
+
+def _check_search_guard(scope: str, tool: str, query: str) -> None:
+    blocked = SEARCH_GUARD.before_search(scope, tool, query)
+    if blocked:
+        logger.debug("Search guard blocked %s for scope %s", tool, scope)
+        raise ValueError(blocked)
+
+
+def web_search(args: Dict[str, Any]) -> Any:
+    if is_torrent_query(args.get("query")):
+        torrent_args = dict(args)
+        torrent_args.pop("domain", None)
+        torrent_args.pop("recency", None)
+        return torrent_search(torrent_args)
+    query, provider, recency, scope = _validate_search_args(args)
+    count = clamp(args.get("max_results", 5), 1, 20)
+    domain = string_arg(args, "domain")
     cache_key = ("search", provider, _normalize_query(query), count, domain.lower(), recency)
     found, value = cache_get(cache_key)
     if found:
         return value
-    scope = _activity_scope(args)
-    blocked = SEARCH_GUARD.before_search(scope, "web_search", query)
-    if blocked:
-        raise ValueError(blocked)
+    _check_search_guard(scope, "web_search", query)
     try:
         value = enforce_output_budget(_do_search(provider, query, count, domain, recency))
         return cache_put(cache_key, 300, value)
@@ -1589,24 +2233,25 @@ def web_search(args: Dict[str, Any]) -> Any:
 
 
 def search_and_fetch(args: Dict[str, Any]) -> Any:
-    query = _validate_query(args.get("query"))
-    provider = validate_provider(string_arg(args, "provider", "auto") or "auto", SEARCH_PROVIDERS)
+    if is_torrent_query(args.get("query")):
+        torrent_args = dict(args)
+        torrent_args["max_results"] = args.get("max_results", 4)
+        torrent_args.pop("fetch_results", None)
+        torrent_args.pop("max_chars", None)
+        torrent_args.pop("domain", None)
+        torrent_args.pop("recency", None)
+        return torrent_search(torrent_args)
+    query, provider, recency, scope = _validate_search_args(args)
     max_results = clamp(args.get("max_results", 4), 1, 10)
     fetch_results = clamp(args.get("fetch_results", 2), 1, 5)
     max_chars = clamp(args.get("max_chars", 4000), 500, 30000)
     domain = string_arg(args, "domain")
-    recency = string_arg(args, "recency").lower() or None
-    if recency and recency not in RECENCY_DAYS:
-        raise ValueError("recency must be one of: day, week, month, year")
     cache_key = ("search_and_fetch", provider, _normalize_query(query), max_results,
                  fetch_results, max_chars, domain.lower(), recency)
     found, value = cache_get(cache_key)
     if found:
         return value
-    scope = _activity_scope(args)
-    blocked = SEARCH_GUARD.before_search(scope, "search_and_fetch", query)
-    if blocked:
-        raise ValueError(blocked)
+    _check_search_guard(scope, "search_and_fetch", query)
 
     def produce() -> Dict[str, Any]:
         search_result = _do_search(provider, query, max_results, domain, recency)
@@ -1645,22 +2290,15 @@ def read_url(args: Dict[str, Any]) -> Any:
 
 
 def research(args: Dict[str, Any]) -> Any:
-    query = _validate_query(args.get("query"))
-    provider = validate_provider(string_arg(args, "provider", "auto") or "auto", SEARCH_PROVIDERS)
+    query, provider, recency, scope = _validate_search_args(args)
     max_sources = clamp(args.get("max_sources", 3), 1, 10)
     max_chars = clamp(args.get("max_chars_per_source", 5000), 500, 50000)
-    recency = string_arg(args, "recency").lower() or None
-    if recency and recency not in RECENCY_DAYS:
-        raise ValueError("recency must be one of: day, week, month, year")
     cache_key = ("research", provider, _normalize_query(query), max_sources,
                  max_chars, recency)
     found, value = cache_get(cache_key)
     if found:
         return value
-    scope = _activity_scope(args)
-    blocked = SEARCH_GUARD.before_search(scope, "research", query)
-    if blocked:
-        raise ValueError(blocked)
+    _check_search_guard(scope, "research", query)
 
     def produce() -> Dict[str, Any]:
         search_result = _do_search(provider, query, max_sources * 3, "", recency)
@@ -1683,9 +2321,7 @@ def news_search(args: Dict[str, Any]) -> Any:
     if found:
         return value
     scope = _activity_scope(args)
-    blocked = SEARCH_GUARD.before_search(scope, "news_search", query)
-    if blocked:
-        raise ValueError(blocked)
+    _check_search_guard(scope, "news_search", query)
     value = enforce_output_budget(_do_search(provider, query, count, "", recency, news=True))
     return cache_put(cache_key, 180, value)
 
@@ -1723,11 +2359,15 @@ def current_time(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def geocode(location: str) -> Dict[str, Any]:
+    cache_key = ("geocode", " ".join(location.lower().split()))
+    found, cached_result = cache_get(cache_key)
+    if found:
+        return cached_result
     params = urllib.parse.urlencode({"name": location, "count": 1, "language": "en", "format": "json"})
     results = get_json(f"https://geocoding-api.open-meteo.com/v1/search?{params}").get("results", [])
     if not results:
         raise ValueError(f"Location not found: {location}")
-    return results[0]
+    return cache_put(cache_key, 86400, results[0])  # Locations don't change; cache 24 h
 
 
 def weather(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1861,7 +2501,11 @@ def _eval_node(node: ast.AST) -> Any:
                 if estimated > math.log10(MAX_ABS_NUMBER):
                     raise ValueError("Power result is too large")
             try:
-                return _ensure_finite_number(left ** right)
+                result = left ** right
+                if isinstance(result, complex):
+                    raise ValueError(
+                        "Result is a complex number; only real numbers are supported")
+                return _ensure_finite_number(result)
             except (OverflowError, ZeroDivisionError):
                 raise ValueError("Invalid power operation")
         raise ValueError("Unsupported operator")
@@ -2054,6 +2698,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     "current_time": current_time,
     "calculate": calculate,
     "convert_units": convert_units,
+    "torrent_search": torrent_search,
 }
 
 
@@ -2092,6 +2737,10 @@ def handle_request(request: Dict[str, Any]) -> None:
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "lookup", "version": VERSION},
             })
+        return
+
+    if method == "notifications/initialized":
+        logger.debug("Client initialized")
         return
 
     if method == "tools/list":
@@ -2143,20 +2792,34 @@ def handle_request(request: Dict[str, Any]) -> None:
         send_rpc_error(request_id, -32601, "Method not found")
 
 
+def _shutdown_handler(signum: int, frame: Any) -> None:
+    logger.info("Received signal %d, shutting down", signum)
+    sys.exit(0)
+
+
 def main() -> None:
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        request: Any = None
-        try:
-            request = json.loads(line)
-            handle_request(request)
-        except json.JSONDecodeError:
-            send_rpc_error(None, -32700, "Parse error")
-        except Exception as exc:
-            request_id = request.get("id") if isinstance(request, dict) else None
-            send_rpc_error(request_id, -32603, "Internal error")
+    signal.signal(signal.SIGTERM, _shutdown_handler)
+    signal.signal(signal.SIGINT, _shutdown_handler)
+    logger.info("Lookup MCP server v%s starting", VERSION)
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            request: Any = None
+            try:
+                request = json.loads(line)
+                handle_request(request)
+            except json.JSONDecodeError:
+                send_rpc_error(None, -32700, "Parse error")
+            except Exception as exc:
+                request_id = request.get("id") if isinstance(request, dict) else None
+                logger.error("Internal error: %s", concise(exc))
+                send_rpc_error(request_id, -32603, "Internal error")
+    except (EOFError, BrokenPipeError, KeyboardInterrupt):
+        pass
+    finally:
+        logger.info("Lookup MCP server shutting down")
 
 
 if __name__ == "__main__":
