@@ -4,11 +4,16 @@ Lookup is a lightweight MCP server for web and torrent search, page reading,
 research, news, weather, time, calculations, and unit conversion. It is designed
 for LM Studio and other MCP clients that work with local models.
 
-## Install
+## Setup
+
+Lookup is not installed as a Python package. LM Studio launches `Search.py`
+directly with a Python interpreter. Keyless mode uses only Python's standard
+library.
 
 The setup script supports macOS and Linux. It installs
 [`uv`](https://docs.astral.sh/uv/) for the current user when needed, lets `uv`
 install Python when needed, creates `.venv`, and checks `Search.py` directly.
+It does not build or install Lookup, and no lockfile is required.
 
 ```sh
 chmod +x setup.sh
@@ -35,13 +40,19 @@ executable path for this checkout. It looks like this:
 Copy that configuration into LM Studio or your MCP client, then restart or
 reload the client.
 
-### Manual setup
+### Use an existing Python
+
+If Python 3.9 or newer is already installed, `uv` and `.venv` are optional. Use
+the path returned by `command -v python3` as `command`, with the absolute path
+to `Search.py` in `args`.
+
+### Manual environment
 
 If `uv` is already installed:
 
 ```sh
 uv venv --python 3.12
-uv run python Search.py
+.venv/bin/python Search.py
 ```
 
 ## Tools
@@ -79,15 +90,15 @@ trusted instance or enable an optional provider.
 |---|:---:|:---:|---|
 | SearXNG | Yes | No | `SEARXNG_URL` (optional) |
 | Brave | Yes | No | `BRAVE_API_KEY` |
-| Ollama | Yes | Yes | `OLLAMA_API_KEY` and the `ollama` extra |
-| Tavily | Yes | Yes | `TAVILY_API_KEY` and the `tavily` extra |
+| Ollama | Yes | Yes | `OLLAMA_API_KEY` and the `ollama` package |
+| Tavily | Yes | Yes | `TAVILY_API_KEY` and the `tavily-python` package |
 | Direct | No | Yes | None |
 
-Install an optional provider extra with:
+Install an optional provider library into `.venv` with:
 
 ```sh
-uv sync --extra ollama
-uv sync --extra tavily
+uv pip install --python .venv/bin/python ollama
+uv pip install --python .venv/bin/python tavily-python
 ```
 
 Add keys or provider settings to the MCP server's `env` object:
@@ -170,17 +181,10 @@ Read https://example.com.
 Find the official Debian torrent.
 ```
 
-## Development
-
-```sh
-uv sync --extra dev
-uv run pytest
-```
-
 Run the MCP server directly with:
 
 ```sh
-uv run python Search.py
+.venv/bin/python Search.py
 ```
 
 Lookup caches repeated requests in memory, limits output size, cools down failing
