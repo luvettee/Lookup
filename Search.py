@@ -18,13 +18,13 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from threading import Lock
 from typing import Any, Callable, Dict, Hashable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 USER_AGENT = f"Lookup-MCP/{VERSION}"
 
 # ---------------- Logging ----------------
@@ -52,7 +52,7 @@ _DNS_CACHE_LOCK = Lock()
 _DNS_CACHE_TTL = 300  # 5 minutes
 _DNS_CACHE_MAX = 512
 
-SEARCH_PROVIDERS: Tuple[str, ...] = ("auto", "brave", "ollama", "tavily", "searxng")
+SEARCH_PROVIDERS: Tuple[str, ...] = ("auto", "brave", "exa", "ollama", "tavily", "searxng")
 FETCH_PROVIDERS: Tuple[str, ...] = ("auto", "ollama", "tavily", "direct")
 
 DEFAULT_SEARXNG_INSTANCES = [
@@ -75,6 +75,7 @@ RECENCY_DAYS = {"day": 1, "week": 7, "month": 30, "year": 365}
 BRAVE_FRESHNESS = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
 BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 BRAVE_NEWS_SEARCH_URL = "https://api.search.brave.com/res/v1/news/search"
+EXA_SEARCH_URL = "https://api.exa.ai/search"
 
 SEARCH_FAILURE_COOLDOWN = 30
 PROVIDER_FAILURE_COOLDOWN = 90
@@ -131,7 +132,7 @@ TOOLS = {
             "properties": {
                 "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
                 "max_results": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
-                "provider": {"type": "string", "enum": ["auto", "brave", "ollama", "tavily", "searxng"], "default": "auto"},
+                "provider": {"type": "string", "enum": list(SEARCH_PROVIDERS), "default": "auto"},
                 "domain": {"type": "string", "description": "Restrict to a domain like github.com"},
                 "recency": {"type": "string", "enum": ["day", "week", "month", "year"]},
             },
@@ -147,7 +148,7 @@ TOOLS = {
                 "max_results": {"type": "integer", "minimum": 1, "maximum": 10, "default": 4},
                 "fetch_results": {"type": "integer", "minimum": 1, "maximum": 5, "default": 2},
                 "max_chars": {"type": "integer", "minimum": 500, "maximum": 30000, "default": 4000},
-                "provider": {"type": "string", "enum": ["auto", "brave", "ollama", "tavily", "searxng"], "default": "auto", "description": "Search provider only. Page fetching uses automatic fallback."},
+                "provider": {"type": "string", "enum": list(SEARCH_PROVIDERS), "default": "auto", "description": "Search provider only. Page fetching uses automatic fallback."},
                 "domain": {"type": "string"},
                 "recency": {"type": "string", "enum": ["day", "week", "month", "year"]},
             },
@@ -177,7 +178,7 @@ TOOLS = {
                 "max_sources": {"type": "integer", "minimum": 1, "maximum": 10, "default": 3},
                 "max_chars_per_source": {"type": "integer", "minimum": 500, "maximum": 50000, "default": 5000},
                 "recency": {"type": "string", "enum": ["day", "week", "month", "year"]},
-                "provider": {"type": "string", "enum": ["auto", "brave", "ollama", "tavily", "searxng"], "default": "auto", "description": "Search provider only. Page fetching uses automatic fallback."},
+                "provider": {"type": "string", "enum": list(SEARCH_PROVIDERS), "default": "auto", "description": "Search provider only. Page fetching uses automatic fallback."},
             },
             "required": ["query"],
         },
@@ -190,7 +191,7 @@ TOOLS = {
                 "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
                 "max_results": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
                 "recency": {"type": "string", "enum": ["day", "week", "month", "year"], "default": "week"},
-                "provider": {"type": "string", "enum": ["auto", "brave", "ollama", "tavily", "searxng"], "default": "auto"},
+                "provider": {"type": "string", "enum": list(SEARCH_PROVIDERS), "default": "auto"},
             },
             "required": ["query"],
         },
@@ -253,7 +254,7 @@ TOOLS = {
             "properties": {
                 "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
                 "max_results": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
-                "provider": {"type": "string", "enum": ["auto", "brave", "ollama", "tavily", "searxng"], "default": "auto"},
+                "provider": {"type": "string", "enum": list(SEARCH_PROVIDERS), "default": "auto"},
                 "validate": {"type": "boolean", "default": True},
             },
             "required": ["query"],
@@ -592,10 +593,54 @@ def get_json(url: str, timeout: float = NETWORK_TIMEOUT,
         raise ValueError("JSON request failed") from exc
 
 
+def post_json(url: str, payload: Dict[str, Any],
+              timeout: float = NETWORK_TIMEOUT,
+              max_bytes: int = MAX_JSON_RESPONSE_BYTES,
+              headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    request_headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+        "Accept-Encoding": "identity",
+        "Content-Type": "application/json",
+    }
+    if headers:
+        request_headers.update(headers)
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers=request_headers,
+                                     method="POST")
+    try:
+        with _open_public(request, timeout=timeout) as response:
+            content_type = _content_type(response)
+            if (content_type not in ("application/json", "text/json") and
+                    not content_type.endswith("+json")):
+                raise ValueError("Expected a JSON response")
+            if (_declared_length(response) or 0) > max_bytes:
+                raise ValueError("JSON response is too large")
+            raw = response.read(max_bytes + 1)
+            if len(raw) > max_bytes:
+                raise ValueError("JSON response is too large")
+            charset = response.headers.get_content_charset() or "utf-8"
+            decoded = json.loads(raw.decode(charset, errors="strict"))
+            if not isinstance(decoded, dict):
+                raise ValueError("JSON response must be an object")
+            return decoded
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f"HTTP {exc.code} from JSON provider") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError("JSON request failed") from exc
+
+
 def require_brave_api_key() -> str:
     api_key = os.environ.get("BRAVE_API_KEY", "").strip()
     if not api_key:
         raise ValueError("Brave API key not configured")
+    return api_key
+
+
+def require_exa_api_key() -> str:
+    api_key = os.environ.get("EXA_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("Exa API key not configured")
     return api_key
 
 
@@ -1481,6 +1526,57 @@ def _search_tavily(query: str, count: int, domain: str, recency: Optional[str]) 
     return client.search(**kwargs)
 
 
+def _exa_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_items = payload.get("results")
+    if not isinstance(raw_items, list):
+        return []
+    items: List[Dict[str, Any]] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        url = raw_item.get("url") or ""
+        highlights = raw_item.get("highlights")
+        snippet = raw_item.get("summary") or raw_item.get("text") or ""
+        if not snippet and isinstance(highlights, list):
+            snippet = " ".join(str(value).strip() for value in highlights
+                               if isinstance(value, str) and value.strip())
+        source = ""
+        try:
+            source = urllib.parse.urlparse(str(url)).hostname or ""
+        except ValueError:
+            pass
+        item: Dict[str, Any] = {
+            "title": raw_item.get("title") or "",
+            "url": url,
+            "description": snippet,
+            "publishedDate": raw_item.get("publishedDate"),
+            "source": source,
+        }
+        items.append(item)
+    return items
+
+
+def _search_exa(query: str, count: int, domain: str,
+                recency: Optional[str], news: bool = False) -> Dict[str, Any]:
+    body: Dict[str, Any] = {
+        "query": query,
+        "numResults": count,
+        "type": "auto",
+        "contents": {"highlights": True},
+    }
+    if domain:
+        body["includeDomains"] = [domain]
+    if recency:
+        start = datetime.now(timezone.utc) - timedelta(days=RECENCY_DAYS[recency])
+        body["startPublishedDate"] = start.isoformat(timespec="seconds").replace(
+            "+00:00", "Z")
+    if news:
+        body["category"] = "news"
+    payload = post_json(EXA_SEARCH_URL, body,
+                        headers={"x-api-key": require_exa_api_key()})
+    return {"results": _exa_items(payload)}
+
+
 def _searxng_query(query: str) -> str:
     """Lead short trailing `in …` qualifiers for engines that overweight term one."""
     if any(marker in query for marker in ('"', "site:", "http://", "https://")):
@@ -1531,6 +1627,8 @@ def _do_search(provider: str, query: str, count: int, domain: str,
         if news:
             if name == "brave":
                 return _search_brave(query, count, "", recency, news=True)
+            if name == "exa":
+                return _search_exa(query, count, "", recency, news=True)
             if name == "ollama":
                 return _search_news_ollama(query, count, recency)
             if name == "tavily":
@@ -1538,6 +1636,8 @@ def _do_search(provider: str, query: str, count: int, domain: str,
             return _search_news_searxng(query, count, recency)
         if name == "brave":
             return _search_brave(query, count, domain, recency)
+        if name == "exa":
+            return _search_exa(query, count, domain, recency)
         if name == "ollama":
             return _search_ollama(query, count, domain, recency)
         if name == "tavily":
@@ -1545,10 +1645,10 @@ def _do_search(provider: str, query: str, count: int, domain: str,
         return _search_searxng(query, count, domain, recency)
 
     def attempt(name: str) -> Dict[str, Any]:
-        if name == "brave":
-            health_name = "search:brave"
+        if name in ("brave", "exa"):
+            health_name = f"search:{name}"
             if not _health_available(health_name):
-                raise ValueError("Brave search is temporarily cooling down")
+                raise ValueError(f"{name.title()} search is temporarily cooling down")
             payload = _attempt_provider(health_name, lambda: searcher(name))
         else:
             payload = searcher(name)
@@ -1586,6 +1686,16 @@ def _do_search(provider: str, query: str, count: int, domain: str,
                 errors["Tavily"] = concise(exc)
         else:
             errors["Tavily"] = "API key not configured"
+        if os.environ.get("EXA_API_KEY"):
+            try:
+                result = attempt("exa")
+                if result["results"]:
+                    return result
+                empty_providers.append("exa")
+            except Exception as exc:
+                errors["Exa"] = concise(exc)
+        else:
+            errors["Exa"] = "API key not configured"
         try:
             result = attempt("searxng")
             if result["results"]:

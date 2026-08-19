@@ -84,15 +84,22 @@ Lookup works without API keys:
 - Time, calculations, and unit conversion are built in.
 
 Public SearXNG instances are best effort. For more predictable service, set a
-trusted instance or enable an optional provider.
+trusted instance or enable an optional provider. Exa and Brave use their HTTP
+APIs directly and do not require additional Python packages.
 
 | Provider | Search | Read pages | Configuration |
 |---|:---:|:---:|---|
 | SearXNG | Yes | No | `SEARXNG_URL` (optional) |
 | Brave | Yes | No | `BRAVE_API_KEY` |
+| Exa | Yes | No | `EXA_API_KEY` |
 | Ollama | Yes | Yes | `OLLAMA_API_KEY` and the `ollama` package |
 | Tavily | Yes | Yes | `TAVILY_API_KEY` and the `tavily-python` package |
 | Direct | No | Yes | None |
+
+Set `provider` to `exa` in `web_search`, `search_and_fetch`, `research`, or
+`news_search` to require Exa. With `provider: auto`, Lookup uses Exa as a
+configured fallback before keyless SearXNG. Domain and recency filters are
+passed to Exa's native search filters.
 
 Install an optional provider library into `.venv` with:
 
@@ -110,6 +117,7 @@ Add keys or provider settings to the MCP server's `env` object:
       "command": "/absolute/path/to/Lookup/.venv/bin/python",
       "args": ["/absolute/path/to/Lookup/Search.py"],
       "env": {
+        "EXA_API_KEY": "your-exa-key",
         "BRAVE_API_KEY": "your-key",
         "SEARXNG_URL": "https://your-searxng.example"
       }
@@ -157,6 +165,7 @@ the source; it is not a legal or content-safety determination.
 | Variable | Purpose |
 |---|---|
 | `BRAVE_API_KEY` | Enable Brave Search |
+| `EXA_API_KEY` | Enable Exa Search |
 | `OLLAMA_API_KEY` | Enable Ollama search and extraction |
 | `TAVILY_API_KEY` | Enable Tavily search and extraction |
 | `SEARXNG_URL` | Preferred SearXNG instance or comma-separated instances |
