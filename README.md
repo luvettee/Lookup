@@ -40,6 +40,19 @@ executable path for this checkout. It looks like this:
 Copy that configuration into LM Studio or your MCP client, then restart or
 reload the client.
 
+### Update
+
+Run the updater from the Lookup folder:
+
+```sh
+./update.sh
+```
+
+The updater downloads only the newest `Search.py` from the repository's `main`
+branch, validates it, performs an MCP startup check, and then replaces the local
+source. It does not use GitHub Releases or modify `.venv`, `mcp.json`, API keys,
+the README, or other local files.
+
 ### Use an existing Python
 
 If Python 3.9 or newer is already installed, `uv` and `.venv` are optional. Use
