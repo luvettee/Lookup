@@ -25,7 +25,11 @@ pub async fn geocode(location: &str) -> Result<Value, String> {
 
     if let Some(arr) = results {
         if let Some(first) = arr.first() {
-            cache_put(&cache_key, Duration::from_secs(86400), first.clone());
+            cache_put(
+                &cache_key,
+                Duration::from_secs(30 * 24 * 60 * 60),
+                first.clone(),
+            );
             return Ok(first.clone());
         }
     }

@@ -220,6 +220,19 @@ reduce server-side request forgery risk. Only set
 `LOOKUP_ALLOW_PRIVATE_URLS=true` when you intentionally need access to trusted
 local services.
 
+### Persistent SQLite cache
+
+Unless `LOOKUP_CACHE_DB` is set to `memory` or `off`, cached tool data is stored
+in SQLite and survives restarts. This includes:
+
+- Geocoded location records for 30 days (`geocode:*` keys)
+- Weather forecasts for 10 minutes (`weather:*` keys)
+- Search, research, page-reading, and news results for their configured TTLs
+
+The `current_time` result is intentionally calculated live on every request so
+SQLite never returns a stale clock value. Timezone information included in a
+cached weather response is persisted with that weather record.
+
 ## Examples
 
 ```text
