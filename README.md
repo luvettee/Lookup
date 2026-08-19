@@ -1,8 +1,9 @@
 # Lookup
 
-Lookup is a high-performance, lightweight MCP server rewritten in Rust for web and torrent search, page reading,
-research, news, weather, time, calculations, and unit conversion. It is designed
-for LM Studio and other MCP clients that work with local models.
+Lookup is a high-performance, lightweight MCP server written in Rust for web and torrent search, page reading,
+research, news, weather, time, calculations, and unit conversion. Web search supports keyless SearXNG plus
+optional Exa, Brave, Ollama, and Tavily providers. It is designed for LM Studio and other MCP clients that work
+with local models.
 
 ## Setup
 
@@ -122,11 +123,27 @@ APIs directly.
 | Ollama | Yes | Yes | `OLLAMA_API_KEY` (and optional `OLLAMA_HOST`) |
 | Tavily | Yes | Yes | `TAVILY_API_KEY` |
 | Direct | No | Yes | None |
+| Chromium | No | Yes | `LOOKUP_CHROMIUM_PATH` (optional; Chrome, Chromium, Edge, and Brave installs are auto-detected on Linux, macOS, and Windows) |
 
-Set `provider` to `exa` in `web_search`, `search_and_fetch`, `research`, or
-`news_search` to require Exa. With `provider: auto`, Lookup uses Exa as a
-configured fallback before keyless SearXNG. Domain and recency filters are
-passed to Exa's native search filters.
+### Exa
+
+Set `EXA_API_KEY` to enable Exa Search. Use `provider: "exa"` in `web_search`,
+`search_and_fetch`, `research`, or `news_search` to require Exa:
+
+```json
+{
+  "query": "latest Rust security announcements",
+  "provider": "exa",
+  "max_results": 5,
+  "recency": "month"
+}
+```
+
+With `provider: "auto"`, Lookup uses configured providers first and Exa remains
+a fallback before keyless SearXNG. Domain and recency filters are passed to
+Exa's native search filters. Exa is used for search; page content is read using
+the configured fetch flow, which tries Chromium first and then falls back to
+other extraction providers and direct HTTP.
 
 Add keys or provider settings to the MCP server's `env` object:
 
@@ -193,6 +210,8 @@ the source; it is not a legal or content-safety determination.
 | `TORZNAB_URLS` | Comma-separated Torznab API endpoints |
 | `TORRENT_SITE_URLS` | Extra HTML indexer templates containing `{query}` |
 | `LOOKUP_ALLOW_PRIVATE_URLS` | Allow requests to local and private addresses |
+| `LOOKUP_CACHE_DB` | SQLite cache path (default: `.lookup-cache.sqlite3`; use `memory` or `off` to disable persistence) |
+| `LOOKUP_CHROMIUM_PATH` | Path to a local Chromium-based browser executable; overrides Linux, macOS, and Windows auto-detection |
 | `LOOKUP_LOG_LEVEL` | Logging level, such as `INFO` or `DEBUG` (default: `WARN`) |
 | `TZ` | Fallback local timezone |
 
@@ -217,8 +236,11 @@ Run the MCP server directly with:
 ./target/release/lookup
 ```
 
-Lookup caches repeated requests in memory, limits output size, cools down failing
-providers, and guards against repetitive tool-call loops.
+Lookup caches repeated requests in memory and SQLite, limits output size, cools down failing
+providers, and guards against repetitive tool-call loops. When a supported Chromium-based browser
+is available, automatic page reads try bounded local rendering first and then fall back to configured
+extraction providers and direct HTTP. DNS is pinned to the validated public target and cross-host
+browser requests are blocked.
 
 ## License
 

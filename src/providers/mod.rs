@@ -8,9 +8,8 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use tracing::debug;
 
-use crate::config::{
-    brave_api_key, exa_api_key, ollama_api_key, tavily_api_key,
-};
+use crate::browser::render_html;
+use crate::config::{brave_api_key, exa_api_key, ollama_api_key, tavily_api_key};
 use crate::health::{attempt_provider, health_available};
 use crate::html::{parse_html, resolve_links, truncate_text, ExtractedLink, ParsedPage};
 use crate::net::{fetch_html, validate_url};
@@ -224,11 +223,31 @@ pub async fn direct_fetch(url: &str, max_chars: usize) -> Result<ParsedPage, Str
     Ok(parsed)
 }
 
+pub async fn chromium_fetch(url: &str, max_chars: usize) -> Result<ParsedPage, String> {
+    let html = render_html(url).await?;
+    let mut parsed = parse_html(&html, url, max_chars);
+    parsed.provider = "chromium".to_string();
+    Ok(parsed)
+}
+
 pub async fn fetch_provider(provider: &str, url: &str, max_chars: usize) -> Result<ParsedPage, String> {
     let safe_url = validate_url(url, true)?;
 
     if provider == "auto" {
         let mut errors = HashMap::new();
+
+        match chromium_fetch(&safe_url, max_chars).await {
+            Ok(page) if !page.content.trim().is_empty() => return Ok(page),
+            Ok(_) => {
+                errors.insert(
+                    "Chromium",
+                    "rendered page contained no readable content".to_string(),
+                );
+            }
+            Err(e) => {
+                errors.insert("Chromium", e);
+            }
+        }
 
         if ollama_api_key().is_some() && health_available("fetch:ollama") {
             let res = attempt_provider("fetch:ollama", || async {
@@ -296,6 +315,10 @@ pub async fn fetch_provider(provider: &str, url: &str, max_chars: usize) -> Resu
         let mut page = extract_fetch(&payload, &safe_url, max_chars);
         page.provider = "tavily".to_string();
         return Ok(page);
+    }
+
+    if provider == "chromium" {
+        return chromium_fetch(&safe_url, max_chars).await;
     }
 
     direct_fetch(&safe_url, max_chars).await

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::env;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ pub const VERSION: &str = "2.2.0";
 pub const USER_AGENT: &str = "Lookup-MCP/2.2.0";
 
 pub const SEARCH_PROVIDERS: &[&str] = &["auto", "brave", "exa", "ollama", "tavily", "searxng"];
-pub const FETCH_PROVIDERS: &[&str] = &["auto", "ollama", "tavily", "direct"];
+pub const FETCH_PROVIDERS: &[&str] = &["auto", "ollama", "tavily", "direct", "chromium"];
 
 pub const DEFAULT_SEARXNG_INSTANCES: &[&str] = &["https://search.mectov.my.id"];
 pub const SEARX_SPACE_DIRECTORY_URL: &str = "https://searx.space/data/instances.json";
@@ -40,6 +41,8 @@ pub const MAX_HTML_RESPONSE_BYTES: usize = 512_000;
 pub const MAX_URL_CHARS: usize = 4096;
 pub const MAX_QUERY_CHARS: usize = 1000;
 pub const MAX_TORRENT_BYTES: usize = 10 * 1024 * 1024;
+pub const MAX_CHROMIUM_HTML_BYTES: usize = 2 * 1024 * 1024;
+pub const CHROMIUM_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub const WEB_ACTIVITY_WINDOW: Duration = Duration::from_secs(60);
 pub const MAX_WEB_ACTIVITY: usize = 5;
@@ -71,6 +74,18 @@ pub fn allow_private_urls() -> bool {
 
 pub fn get_env_trimmed(name: &str) -> Option<String> {
     env::var(name).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+pub fn cache_db_path() -> Option<PathBuf> {
+    match get_env_trimmed("LOOKUP_CACHE_DB") {
+        Some(value) if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("memory") => None,
+        Some(value) => Some(PathBuf::from(value)),
+        None => Some(PathBuf::from(".lookup-cache.sqlite3")),
+    }
+}
+
+pub fn chromium_path() -> Option<String> {
+    get_env_trimmed("LOOKUP_CHROMIUM_PATH")
 }
 
 pub fn brave_api_key() -> Option<String> {
