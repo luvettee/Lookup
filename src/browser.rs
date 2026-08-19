@@ -2,12 +2,15 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use tempfile::TempDir;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 use url::Url;
 
-use crate::config::{chromium_path, CHROMIUM_TIMEOUT, MAX_CHROMIUM_HTML_BYTES};
+use crate::config::{
+    chromium_path, CHROMIUM_TIMEOUT, MAX_CHROMIUM_HTML_BYTES, MAX_SCREENSHOT_BYTES,
+};
 use crate::net::ssrf::{is_global_ip, resolve_host, validate_url};
 
 fn push_unique(candidates: &mut Vec<PathBuf>, candidate: impl Into<PathBuf>) {
@@ -194,6 +197,92 @@ pub async fn render_html(url: &str) -> Result<String, String> {
     for executable in chromium_candidates() {
         match run_chromium(&executable, &safe_url, &resolver_rules).await {
             Ok(html) => return Ok(html),
+            Err(error) => last_error = error,
+        }
+    }
+
+    Err(last_error)
+}
+
+async fn run_screenshot(
+    executable: &Path,
+    url: &str,
+    resolver_rules: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    let temp_dir = TempDir::new().map_err(|_| "Could not create screenshot directory".to_string())?;
+    let screenshot_path = temp_dir.path().join("screenshot.png");
+    let screenshot_arg = format!("--screenshot={}", screenshot_path.display());
+    let window_arg = format!("--window-size={width},{height}");
+    let resolver_arg = format!("--host-resolver-rules={resolver_rules}");
+
+    let mut child = Command::new(executable)
+        .args([
+            "--headless=new",
+            "--disable-gpu",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-sync",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--incognito",
+            "--hide-scrollbars",
+            "--virtual-time-budget=5000",
+        ])
+        .arg(resolver_arg)
+        .arg(window_arg)
+        .arg(screenshot_arg)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|_| "Chromium executable was not available".to_string())?;
+
+    let status = match timeout(CHROMIUM_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(_)) => return Err("Chromium screenshot process failed".to_string()),
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err("Chromium screenshot timed out".to_string());
+        }
+    };
+    if !status.success() {
+        return Err("Chromium failed to capture the page".to_string());
+    }
+
+    let metadata = std::fs::metadata(&screenshot_path)
+        .map_err(|_| "Chromium did not produce a screenshot".to_string())?;
+    if metadata.len() == 0 || metadata.len() > MAX_SCREENSHOT_BYTES {
+        return Err("Chromium screenshot is empty or too large".to_string());
+    }
+
+    let png = std::fs::read(&screenshot_path)
+        .map_err(|_| "Could not read Chromium screenshot".to_string())?;
+    if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("Chromium produced an invalid PNG screenshot".to_string());
+    }
+    Ok(png)
+}
+
+pub async fn screenshot_png(url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    let (safe_url, resolver_rules) = pinned_target(url)?;
+    let mut last_error = "Chromium executable was not available".to_string();
+
+    for executable in chromium_candidates() {
+        match run_screenshot(
+            &executable,
+            &safe_url,
+            &resolver_rules,
+            width,
+            height,
+        )
+        .await
+        {
+            Ok(png) => return Ok(png),
             Err(error) => last_error = error,
         }
     }

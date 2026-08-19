@@ -5,6 +5,7 @@ pub mod page_links;
 pub mod read_url;
 pub mod research;
 pub mod search_and_fetch;
+pub mod screenshot_url;
 pub mod time;
 pub mod torrent;
 pub mod weather;
@@ -18,6 +19,7 @@ pub async fn dispatch_tool(name: &str, args: &HashMap<String, Value>) -> Result<
         "web_search" => web_search::web_search(args).await,
         "search_and_fetch" => search_and_fetch::search_and_fetch(args).await,
         "read_url" => read_url::read_url(args).await,
+        "screenshot_url" => screenshot_url::screenshot_url(args).await,
         "research" => research::research(args).await,
         "news_search" => news_search::news_search(args).await,
         "page_links" => page_links::page_links(args).await,

@@ -16,12 +16,13 @@ fn test_mcp_initialize() {
 fn test_mcp_tools_list() {
     let resp = make_tools_list_response(Some(json!(2))).unwrap();
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 12);
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert!(tool_names.contains(&"web_search"));
     assert!(tool_names.contains(&"search_and_fetch"));
     assert!(tool_names.contains(&"read_url"));
+    assert!(tool_names.contains(&"screenshot_url"));
     assert!(tool_names.contains(&"research"));
     assert!(tool_names.contains(&"news_search"));
     assert!(tool_names.contains(&"page_links"));

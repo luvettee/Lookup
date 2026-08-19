@@ -1,4 +1,5 @@
 pub mod brave;
+pub mod chromium;
 pub mod exa;
 pub mod ollama;
 pub mod searxng;
@@ -334,6 +335,7 @@ async fn execute_single_provider(
 ) -> Result<Value, String> {
     match name {
         "brave" => brave::search_brave(query, count, domain, recency, news).await,
+        "chromium" => chromium::search_chromium(query, count, domain, recency, news).await,
         "exa" => exa::search_exa(query, count, domain, recency, news).await,
         "ollama" => {
             if news && recency.is_some() {
@@ -374,7 +376,7 @@ async fn attempt_single(
     recency: Option<&str>,
     news: bool,
 ) -> Result<Value, String> {
-    let payload = if name == "brave" || name == "exa" {
+    let payload = if name == "brave" || name == "chromium" || name == "exa" {
         let health_name = format!("search:{}", name);
         if !health_available(&health_name) {
             return Err(format!("{} search is temporarily cooling down", name));
@@ -499,6 +501,23 @@ pub async fn do_search(
             }
         }
 
+        match attempt_single("chromium", query, count, domain, recency, news).await {
+            Ok(res) => {
+                let has_results = res
+                    .get("results")
+                    .and_then(|v| v.as_array())
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false);
+                if has_results {
+                    return Ok(res);
+                }
+                empty_providers.push("chromium");
+            }
+            Err(e) => {
+                errors.insert("Chromium", e);
+            }
+        }
+
         if !empty_providers.is_empty() {
             return Ok(json!({
                 "provider": "none",
@@ -518,6 +537,7 @@ pub async fn do_search(
 
     match provider {
         "brave" => attempt_single("brave", query, count, domain, recency, news).await,
+        "chromium" => attempt_single("chromium", query, count, domain, recency, news).await,
         "exa" => attempt_single("exa", query, count, domain, recency, news).await,
         "ollama" => attempt_single("ollama", query, count, domain, recency, news).await,
         "tavily" => attempt_single("tavily", query, count, domain, recency, news).await,

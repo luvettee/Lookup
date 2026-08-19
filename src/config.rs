@@ -7,7 +7,9 @@ use std::time::Duration;
 pub const VERSION: &str = "2.2.0";
 pub const USER_AGENT: &str = "Lookup-MCP/2.2.0";
 
-pub const SEARCH_PROVIDERS: &[&str] = &["auto", "brave", "exa", "ollama", "tavily", "searxng"];
+pub const SEARCH_PROVIDERS: &[&str] = &[
+    "auto", "brave", "chromium", "exa", "ollama", "tavily", "searxng",
+];
 pub const FETCH_PROVIDERS: &[&str] = &["auto", "ollama", "tavily", "direct", "chromium"];
 
 pub const DEFAULT_SEARXNG_INSTANCES: &[&str] = &["https://search.mectov.my.id"];
@@ -42,6 +44,9 @@ pub const MAX_URL_CHARS: usize = 4096;
 pub const MAX_QUERY_CHARS: usize = 1000;
 pub const MAX_TORRENT_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_CHROMIUM_HTML_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_SCREENSHOT_BYTES: u64 = 5 * 1024 * 1024;
+pub const MAX_SCREENSHOT_WIDTH: u32 = 1920;
+pub const MAX_SCREENSHOT_HEIGHT: u32 = 1080;
 pub const CHROMIUM_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub const WEB_ACTIVITY_WINDOW: Duration = Duration::from_secs(60);

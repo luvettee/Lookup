@@ -2,7 +2,7 @@
 
 Lookup is a high-performance, lightweight MCP server written in Rust for web and torrent search, page reading,
 research, news, weather, time, calculations, and unit conversion. Web search supports keyless SearXNG plus
-optional Exa, Brave, Ollama, and Tavily providers. It is designed for LM Studio and other MCP clients that work
+optional Exa, Brave, Ollama, Tavily, and local Chromium providers. It is designed for LM Studio and other MCP clients that work
 with local models.
 
 ## Setup
@@ -90,6 +90,7 @@ The updater pulls the latest source and rebuilds the optimized release binary.
 | `search_and_fetch` | Search and read a few strong results |
 | `web_search` | Return compact search results and URLs |
 | `read_url` | Read a known webpage |
+| `screenshot_url` | Capture a bounded PNG screenshot with local Chromium |
 | `research` | Gather several independent sources |
 | `news_search` | Find recent news |
 | `page_links` | List useful links from a webpage |
@@ -123,7 +124,41 @@ APIs directly.
 | Ollama | Yes | Yes | `OLLAMA_API_KEY` (and optional `OLLAMA_HOST`) |
 | Tavily | Yes | Yes | `TAVILY_API_KEY` |
 | Direct | No | Yes | None |
-| Chromium | No | Yes | `LOOKUP_CHROMIUM_PATH` (optional; Chrome, Chromium, Edge, and Brave installs are auto-detected on Linux, macOS, and Windows) |
+| Chromium | Yes | Yes | `LOOKUP_CHROMIUM_PATH` (optional; Chrome, Chromium, Edge, and Brave installs are auto-detected on Linux, macOS, and Windows) |
+
+### Chromium screenshots
+
+Use `screenshot_url` to capture visual page content as an MCP `image` result:
+
+```json
+{
+  "url": "https://example.com",
+  "width": 1280,
+  "height": 720
+}
+```
+
+Screenshots use a secure temporary directory, are limited to a 1920×1080 viewport
+and a 5 MiB PNG, and inherit Chromium's timeout, public-IP validation, DNS pinning,
+and cross-host request restrictions. Screenshot files are deleted immediately
+after being read and are not stored in SQLite.
+
+### Chromium search
+
+Set `provider: "chromium"` in `web_search`, `search_and_fetch`, `research`, or
+`news_search` to perform a browser-rendered DuckDuckGo HTML search without a
+search API key. Queries, domain filters, and recency filters are URL-encoded,
+and result links are validated and deduplicated. Browser search is slower and
+may encounter anti-bot challenges, so `provider: "auto"` uses it only as a
+last-resort fallback after the existing search providers.
+
+```json
+{
+  "query": "fun facts about Vancouver",
+  "provider": "chromium",
+  "max_results": 5
+}
+```
 
 ### Exa
 

@@ -1,0 +1,1601 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lookup</title>
+  <meta name="description" content="Lookup is a lightweight Rust MCP server for web tools." />
+  <link rel="icon" type="image/png" href="favicon.png" />
+
+  <script>
+(function () {
+      try {
+        const stored = localStorage.getItem("lookup-theme");
+        const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+        const theme = stored ? stored : (prefersLight ? "light" : "dark");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --text: #eeeeea;
+      --muted: #888883;
+      --line: #242424;
+      --accent: #d9b8c7;
+      --accent-muted: rgba(217, 184, 199, 0.15);
+      --code-bg: #0d0d0d;
+      --code-text: #cfcfc9;
+      --toggle-bg: #141414;
+      --toggle-border: #282828;
+      --toggle-hover-bg: #1c1c1c;
+      --toggle-glow: rgba(217, 184, 199, 0.15);
+      --card-bg: #121212;
+      --card-border: #242424;
+      --card-hover-border: #d9b8c7;
+      --modal-overlay: rgba(0, 0, 0, 0.72);
+      --mono: "SFMono-Regular", "SF Mono", "JetBrains Mono", monospace;
+    }
+
+    [data-theme="light"] {
+      --bg: #fbfbfa;
+      --text: #181816;
+      --muted: #73726c;
+      --line: #e5e4de;
+      --accent: #9c4b6c;
+      --accent-muted: rgba(156, 75, 108, 0.12);
+      --code-bg: #f2f1ec;
+      --code-text: #242421;
+      --toggle-bg: #f2f1ec;
+      --toggle-border: #dcdbd3;
+      --toggle-hover-bg: #e8e6de;
+      --toggle-glow: rgba(156, 75, 108, 0.15);
+      --card-bg: #f5f4ef;
+      --card-border: #e2e0d8;
+      --card-hover-border: #9c4b6c;
+      --modal-overlay: rgba(15, 15, 15, 0.45);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    a:hover {
+      color: var(--accent);
+    }
+
+    .wrap {
+      width: min(100% - 32px, 720px);
+      margin: 0 auto;
+      padding: 56px 0 80px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+      transition: border-color 0.3s ease;
+    }
+
+    .logo {
+      font-weight: 600;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      letter-spacing: -0.01em;
+    }
+
+    .logo-img {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: block;
+      object-fit: cover;
+      flex-shrink: 0;
+      border: 1px solid var(--toggle-border);
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.2s ease;
+    }
+
+    .logo:hover .logo-img {
+      transform: scale(1.08);
+      border-color: var(--accent);
+    }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .github,
+    .theme-toggle {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      margin: 0;
+      background: var(--toggle-bg);
+      border: 1px solid var(--toggle-border);
+      border-radius: 8px;
+      color: var(--text);
+      cursor: pointer;
+      outline: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: background-color 0.25s ease, border-color 0.25s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease, color 0.2s ease;
+    }
+
+    .github:hover,
+    .theme-toggle:hover {
+      background: var(--toggle-hover-bg);
+      border-color: var(--accent);
+      color: var(--text);
+      box-shadow: 0 0 14px var(--toggle-glow);
+      transform: translateY(-1px);
+    }
+
+    .github:active,
+    .theme-toggle:active {
+      transform: scale(0.9);
+    }
+
+    .github:focus-visible,
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .github svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+      transition: transform 0.25s ease;
+    }
+
+    .theme-icon {
+      display: block;
+      width: 16px;
+      height: 16px;
+      overflow: visible;
+      transition: transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .theme-toggle:hover .theme-icon {
+      transform: rotate(18deg);
+    }
+
+    [data-theme="light"] .theme-toggle:hover .theme-icon {
+      transform: rotate(45deg);
+    }
+
+    .sun-moon {
+      transition: transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1), r 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+      transform-origin: center;
+    }
+
+    .mask-circle {
+      transition: cx 0.65s cubic-bezier(0.34, 1.56, 0.64, 1), cy 0.65s cubic-bezier(0.34, 1.56, 0.64, 1), r 0.55s ease;
+    }
+
+    .sun-rays {
+      transform-origin: center;
+      transition: transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease;
+    }
+
+    .stars {
+      transform-origin: center;
+      transition: transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.45s ease;
+    }
+
+    :root:not([data-theme="light"]) .sun-moon {
+      transform: rotate(-12deg);
+      r: 8px;
+    }
+
+    :root:not([data-theme="light"]) .mask-circle {
+      cx: 17px;
+      cy: 7px;
+      r: 7px;
+    }
+
+    :root:not([data-theme="light"]) .sun-rays {
+      opacity: 0;
+      transform: scale(0.2) rotate(-60deg);
+    }
+
+    :root:not([data-theme="light"]) .stars {
+      opacity: 1;
+      transform: scale(1) rotate(0deg);
+    }
+
+    [data-theme="light"] .sun-moon {
+      transform: rotate(0deg);
+      r: 4.5px;
+    }
+
+    [data-theme="light"] .mask-circle {
+      cx: 30px;
+      cy: 0px;
+      r: 0px;
+    }
+
+    [data-theme="light"] .sun-rays {
+      opacity: 1;
+      transform: scale(1) rotate(0deg);
+    }
+
+    [data-theme="light"] .stars {
+      opacity: 0;
+      transform: scale(0) rotate(-45deg);
+    }
+
+    @keyframes twinkle {
+      0%, 100% { opacity: 0.3; transform: scale(0.65); }
+      50% { opacity: 1; transform: scale(1.25); }
+    }
+
+    .star-1 {
+      animation: twinkle 3.2s ease-in-out infinite;
+      transform-origin: 19px 4px;
+    }
+
+    .star-2 {
+      animation: twinkle 2.6s ease-in-out infinite 1.3s;
+      transform-origin: 5px 19px;
+    }
+
+    .particle-burst {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+
+    .particle {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0;
+      transform: translate(-50%, -50%);
+    }
+
+    .animating .particle {
+      animation: burst 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    .animating .p1 { --tx: 0px; --ty: -18px; }
+    .animating .p2 { --tx: 16px; --ty: -9px; }
+    .animating .p3 { --tx: 16px; --ty: 9px; }
+    .animating .p4 { --tx: 0px; --ty: 18px; }
+    .animating .p5 { --tx: -16px; --ty: 9px; }
+    .animating .p6 { --tx: -16px; --ty: -9px; }
+
+    @keyframes burst {
+      0% {
+        opacity: 1;
+        transform: translate(-50%, -50%) translate(0, 0) scale(1.2);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) translate(var(--tx), var(--ty)) scale(0);
+      }
+    }
+
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation: none;
+      mix-blend-mode: normal;
+    }
+
+    ::view-transition-image-pair(root) {
+      isolation: isolate;
+    }
+
+    ::view-transition-old(root) {
+      z-index: 1;
+    }
+
+    ::view-transition-new(root) {
+      z-index: 9999;
+    }
+
+    @supports (view-transition-name: root) {
+      body,
+      header,
+      .tools,
+      .tool,
+      .tool span,
+      .code-box,
+      pre,
+      footer,
+      h2 {
+        transition: none !important;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      ::view-transition-old(root),
+      ::view-transition-new(root) {
+        animation: none !important;
+      }
+      .theme-icon,
+      .sun-moon,
+      .sun-rays,
+      .stars,
+      .mask-circle,
+      .modal-backdrop,
+      .modal-window,
+      body,
+      header,
+      .tool,
+      pre {
+        transition: none !important;
+        animation: none !important;
+      }
+    }
+
+    main {
+      padding-top: 64px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(32px, 8vw, 56px);
+      line-height: 1.05;
+      letter-spacing: -0.06em;
+      font-weight: 500;
+    }
+
+    .intro {
+      max-width: 560px;
+      margin: 20px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      transition: color 0.3s ease;
+    }
+
+    .links {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .install-trigger-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--card-bg);
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.15s ease, color 0.2s ease;
+    }
+
+    .install-trigger-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    section {
+      margin-top: 72px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    h2 {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 400;
+      transition: color 0.3s ease;
+      text-transform: lowercase;
+    }
+
+    .tab-nav {
+      position: relative;
+      display: inline-flex;
+      gap: 4px;
+      background: var(--card-bg);
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+
+    .tab-glider {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      left: 0;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .tab-btn {
+      position: relative;
+      z-index: 2;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: color 0.2s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .tab-btn svg {
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      color: var(--text);
+    }
+
+    .tab-btn.active {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .tools {
+      border-top: 1px solid var(--line);
+      transition: border-color 0.3s ease;
+    }
+
+    .tool {
+      display: grid;
+      grid-template-columns: 165px 1fr;
+      gap: 20px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--line);
+      transition: border-color 0.3s ease;
+    }
+
+    .tool span:last-child {
+      color: var(--muted);
+      transition: color 0.3s ease;
+    }
+
+    .code-box {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--code-bg);
+      overflow: hidden;
+      margin-bottom: 16px;
+      transition: border-color 0.3s ease, background-color 0.3s ease;
+    }
+
+    .code-box-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .code-box-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .code-box-title svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+    }
+
+    .copy-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--muted);
+      font: inherit;
+      font-size: 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .copy-button svg {
+      width: 11px;
+      height: 11px;
+      stroke: currentColor;
+      transition: transform 0.2s ease;
+    }
+
+    .copy-button:hover {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    .copy-button.copied {
+      color: #38a169;
+      border-color: #38a169;
+    }
+
+    [data-theme="light"] .copy-button.copied {
+      color: #276749;
+      border-color: #276749;
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px 16px;
+      overflow-x: auto;
+      background: transparent;
+      color: var(--code-text);
+      font: inherit;
+      line-height: 1.7;
+    }
+
+    code {
+      font: inherit;
+    }
+
+    .instruction-step {
+      margin-bottom: 20px;
+    }
+
+    .step-title {
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .step-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-muted);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .step-desc {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 10px;
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+      animation: tabSlideReveal 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes tabSlideReveal {
+      from {
+        opacity: 0;
+        transform: translateY(5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .platform-selector {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .platform-card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 16px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+      border-radius: 10px;
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      position: relative;
+    }
+
+    .platform-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px var(--toggle-glow);
+    }
+
+    .platform-card.active {
+      border-color: var(--accent);
+      background: var(--bg);
+      box-shadow: 0 0 0 1px var(--accent), 0 8px 24px var(--toggle-glow);
+    }
+
+    .platform-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 10px;
+    }
+
+    .platform-icon-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+    }
+
+    .platform-icon-group svg {
+      flex-shrink: 0;
+    }
+
+    .platform-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .platform-sub {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: var(--modal-overlay);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 10000;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.25s ease, visibility 0.25s ease;
+    }
+
+    .modal-backdrop.open {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal-window {
+      width: min(100%, 620px);
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+      padding: 28px;
+      position: relative;
+      transform: scale(0.93) translateY(16px);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.3s ease, border-color 0.3s ease;
+      max-height: 88vh;
+      overflow-y: auto;
+    }
+
+    .modal-backdrop.open .modal-window {
+      transform: scale(1) translateY(0);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 4px;
+      letter-spacing: -0.02em;
+    }
+
+    .modal-subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .modal-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--card-bg);
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0;
+      transition: all 0.2s ease;
+    }
+
+    .modal-close svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+    }
+
+    .modal-close:hover {
+      color: var(--text);
+      border-color: var(--accent);
+      transform: scale(1.05);
+    }
+
+    .modal-content {
+      margin-top: 14px;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .modal-footer-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .modal-footer-link svg {
+      width: 12px;
+      height: 12px;
+      stroke: currentColor;
+    }
+
+    footer {
+      margin-top: 72px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+      opacity: 0.8;
+      transition: border-color 0.3s ease, color 0.3s ease;
+    }
+
+    @media (max-width: 560px) {
+      .wrap {
+        padding-top: 28px;
+      }
+
+      main {
+        padding-top: 46px;
+      }
+
+      .platform-selector {
+        grid-template-columns: 1fr;
+      }
+
+      .tool {
+        grid-template-columns: 1fr;
+        gap: 2px;
+      }
+
+      .modal-window {
+        padding: 20px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <a class="logo" href="#">
+        <img src="favicon.png" alt="Lookup" class="logo-img" width="26" height="26" />
+        <span>Lookup</span>
+      </a>
+      <div class="nav-right">
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme (Press T)">
+          <svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <mask id="moon-mask">
+              <rect x="0" y="0" width="24" height="24" fill="white" />
+              <circle class="mask-circle" cx="17" cy="7" r="7" fill="black" />
+            </mask>
+
+            <circle class="sun-moon" cx="12" cy="12" r="8" fill="currentColor" mask="url(#moon-mask)" />
+
+            <g class="sun-rays" stroke="currentColor">
+              <line x1="12" y1="1" x2="12" y2="3.5" />
+              <line x1="12" y1="20.5" x2="12" y2="23" />
+              <line x1="4.22" y1="4.22" x2="5.99" y2="5.99" />
+              <line x1="18.01" y1="18.01" x2="19.78" y2="19.78" />
+              <line x1="1" y1="12" x2="3.5" y2="12" />
+              <line x1="20.5" y1="12" x2="23" y2="12" />
+              <line x1="4.22" y1="19.78" x2="5.99" y2="18.01" />
+              <line x1="18.01" y1="5.99" x2="19.78" y2="4.22" />
+            </g>
+
+            <g class="stars">
+              <circle class="star-1" cx="19" cy="4" r="1.2" fill="currentColor" stroke="none" />
+              <circle class="star-2" cx="5" cy="19" r="0.9" fill="currentColor" stroke="none" />
+            </g>
+          </svg>
+
+          <div class="particle-burst" aria-hidden="true">
+            <span class="particle p1"></span>
+            <span class="particle p2"></span>
+            <span class="particle p3"></span>
+            <span class="particle p4"></span>
+            <span class="particle p5"></span>
+            <span class="particle p6"></span>
+          </div>
+        </button>
+
+        <a class="github" href="https://github.com/luvettee/Lookup" target="_blank" rel="noreferrer" aria-label="GitHub" title="GitHub">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        </a>
+      </div>
+    </header>
+
+    <main>
+      <h1>Web tools for local models.</h1>
+
+      <p class="intro">
+        Lookup is a small Rust MCP server for search, reading pages, research,
+        news, weather, time, calculations, conversions, and torrent search.
+      </p>
+
+      <div class="links">
+        <a href="https://github.com/luvettee/Lookup" class="install-trigger-btn" target="_blank" rel="noreferrer">
+          <span>source</span>
+        </a>
+        <button id="open-install-popup" class="install-trigger-btn" type="button">
+          <span>install</span>
+        </button>
+      </div>
+
+      <section>
+        <h2>tools</h2>
+
+        <div class="tools">
+          <div class="tool"><span>search_and_fetch</span><span>search and read useful results</span></div>
+          <div class="tool"><span>web_search</span><span>compact web search</span></div>
+          <div class="tool"><span>read_url</span><span>read a known page</span></div>
+          <div class="tool"><span>screenshot_url</span><span>capture visual page screenshot</span></div>
+          <div class="tool"><span>research</span><span>gather several independent sources</span></div>
+          <div class="tool"><span>news_search</span><span>recent news and time-sensitive updates</span></div>
+          <div class="tool"><span>page_links</span><span>list useful links from a webpage</span></div>
+          <div class="tool"><span>weather</span><span>weather and forecast</span></div>
+          <div class="tool"><span>current_time</span><span>timezone-aware date and time</span></div>
+          <div class="tool"><span>calculate</span><span>evaluate mathematical expressions</span></div>
+          <div class="tool"><span>convert_units</span><span>convert common units</span></div>
+          <div class="tool"><span>torrent_search</span><span>torrent and magnet search</span></div>
+        </div>
+      </section>
+
+      <section id="install">
+        <div class="section-header">
+          <h2>install</h2>
+          <div class="tab-nav">
+            <div class="tab-glider" id="tab-glider"></div>
+            <button class="tab-btn active" data-target="unix">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.56-1.701z"/></svg>
+              <span>macOS / Linux</span>
+            </button>
+            <button class="tab-btn" data-target="windows">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><rect x="3" y="3" width="8.4" height="8.4" rx="0.8"/><rect x="12.6" y="3" width="8.4" height="8.4" rx="0.8"/><rect x="3" y="12.6" width="8.4" height="8.4" rx="0.8"/><rect x="12.6" y="12.6" width="8.4" height="8.4" rx="0.8"/></svg>
+              <span>Windows</span>
+            </button>
+            <button class="tab-btn" data-target="manual">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>Manual Cargo</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="tab-panel active" id="panel-unix">
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">1</span>
+              <span>Clone &amp; run setup script</span>
+            </div>
+            <p class="step-desc">Clones the repo, ensures Rust is installed via rustup, compiles the optimized release binary, and performs a live MCP handshake test. No sudo required.</p>
+            
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                  <span>Terminal (macOS / Linux)</span>
+                </span>
+                <button class="copy-button" data-copy="git clone https://github.com/luvettee/Lookup.git && cd Lookup && chmod +x setup.sh && ./setup.sh">
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>git clone https://github.com/luvettee/Lookup.git
+cd Lookup
+chmod +x setup.sh && ./setup.sh</code></pre>
+            </div>
+          </div>
+
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">2</span>
+              <span>Add to LM Studio / Claude MCP config</span>
+            </div>
+            <p class="step-desc">Paste this into your client&apos;s MCP configuration with the generated absolute binary path:</p>
+            
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  <span>mcp.json</span>
+                </span>
+                <button class="copy-button" data-copy=&apos;{
+  &quot;mcpServers&quot;: {
+    &quot;Lookup&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/Lookup/target/release/lookup&quot;,
+      &quot;args&quot;: []
+    }
+  }
+}&apos;>
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>{
+  "mcpServers": {
+    "Lookup": {
+      "command": "/path/to/Lookup/target/release/lookup",
+      "args": []
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="panel-windows">
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">1</span>
+              <span>Clone &amp; run Windows setup script</span>
+            </div>
+            <p class="step-desc">Clones the repo, downloads rustup if cargo is missing, builds the release binary, and outputs your formatted Windows MCP JSON.</p>
+            
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                  <span>PowerShell (Standard User)</span>
+                </span>
+                <button class="copy-button" data-copy="git clone https://github.com/luvettee/Lookup.git; cd Lookup; .\setup.ps1">
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>git clone https://github.com/luvettee/Lookup.git
+cd Lookup
+.\setup.ps1</code></pre>
+            </div>
+          </div>
+
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">2</span>
+              <span>Add to Windows MCP config</span>
+            </div>
+            <p class="step-desc">Windows configuration uses escaped backslashes:</p>
+            
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  <span>mcp.json</span>
+                </span>
+                <button class="copy-button" data-copy=&apos;{
+  &quot;mcpServers&quot;: {
+    &quot;Lookup&quot;: {
+      &quot;command&quot;: &quot;C:\\path\\to\\Lookup\\target\\release\\lookup.exe&quot;,
+      &quot;args&quot;: []
+    }
+  }
+}&apos;>
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>{
+  "mcpServers": {
+    "Lookup": {
+      "command": "C:\\path\\to\\Lookup\\target\\release\\lookup.exe",
+      "args": []
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="panel-manual">
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">1</span>
+              <span>Clone &amp; compile with Cargo</span>
+            </div>
+            <p class="step-desc">If Cargo is already installed on your path:</p>
+            
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                  <span>Terminal</span>
+                </span>
+                <button class="copy-button" data-copy="git clone https://github.com/luvettee/Lookup.git && cd Lookup && cargo build --release">
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>git clone https://github.com/luvettee/Lookup.git
+cd Lookup
+cargo build --release</code></pre>
+            </div>
+          </div>
+
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">2</span>
+              <span>Executable location</span>
+            </div>
+            <p class="step-desc">The binary will be located at <code>target/release/lookup</code> (or <code>target\release\lookup.exe</code> on Windows).</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      made by bober &gt;.&lt;
+    </footer>
+  </div>
+
+  <div class="modal-backdrop" id="install-modal" aria-hidden="true" role="dialog" aria-modal="true">
+    <div class="modal-window">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">Install Lookup</h3>
+          <p class="modal-subtitle">Select your operating system to get setup commands:</p>
+        </div>
+        <button class="modal-close" id="close-install-modal" type="button" aria-label="Close modal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <div class="platform-selector">
+        <button type="button" class="platform-card" data-os="unix" id="modal-card-unix">
+          <div class="platform-card-header">
+            <div class="platform-icon-group">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.56-1.701z"/></svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+            </div>
+          </div>
+          <div class="platform-name">macOS &amp; Linux</div>
+          <div class="platform-sub">Automated <code>setup.sh</code> script (zero sudo required)</div>
+        </button>
+
+        <button type="button" class="platform-card" data-os="windows" id="modal-card-windows">
+          <div class="platform-card-header">
+            <div class="platform-icon-group">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><rect x="3" y="3" width="8.4" height="8.4" rx="0.8"/><rect x="12.6" y="3" width="8.4" height="8.4" rx="0.8"/><rect x="3" y="12.6" width="8.4" height="8.4" rx="0.8"/><rect x="12.6" y="12.6" width="8.4" height="8.4" rx="0.8"/></svg>
+            </div>
+          </div>
+          <div class="platform-name">Windows</div>
+          <div class="platform-sub">PowerShell <code>setup.ps1</code> or double-click <code>setup.cmd</code></div>
+        </button>
+      </div>
+
+      <div class="modal-content">
+        
+        <div class="modal-panel" id="modal-panel-unix">
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">1</span>
+              <span>Clone &amp; Execute Setup</span>
+            </div>
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                  <span>Terminal (macOS / Linux)</span>
+                </span>
+                <button class="copy-button" data-copy="git clone https://github.com/luvettee/Lookup.git && cd Lookup && chmod +x setup.sh && ./setup.sh">
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>git clone https://github.com/luvettee/Lookup.git
+cd Lookup
+chmod +x setup.sh && ./setup.sh</code></pre>
+            </div>
+          </div>
+
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">2</span>
+              <span>MCP Client Configuration</span>
+            </div>
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  <span>mcp.json</span>
+                </span>
+                <button class="copy-button" data-copy=&apos;{
+  &quot;mcpServers&quot;: {
+    &quot;Lookup&quot;: {
+      &quot;command&quot;: &quot;/absolute/path/to/Lookup/target/release/lookup&quot;,
+      &quot;args&quot;: []
+    }
+  }
+}&apos;>
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>{
+  "mcpServers": {
+    "Lookup": {
+      "command": "/path/to/Lookup/target/release/lookup",
+      "args": []
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-panel" id="modal-panel-windows" style="display: none;">
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">1</span>
+              <span>Clone &amp; Execute Windows Setup</span>
+            </div>
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                  <span>PowerShell / CMD</span>
+                </span>
+                <button class="copy-button" data-copy="git clone https://github.com/luvettee/Lookup.git; cd Lookup; .\setup.ps1">
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>git clone https://github.com/luvettee/Lookup.git
+cd Lookup
+.\setup.ps1</code></pre>
+            </div>
+          </div>
+
+          <div class="instruction-step">
+            <div class="step-title">
+              <span class="step-badge">2</span>
+              <span>Windows MCP Client Configuration</span>
+            </div>
+            <div class="code-box">
+              <div class="code-box-bar">
+                <span class="code-box-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  <span>mcp.json</span>
+                </span>
+                <button class="copy-button" data-copy=&apos;{
+  &quot;mcpServers&quot;: {
+    &quot;Lookup&quot;: {
+      &quot;command&quot;: &quot;C:\\path\\to\\Lookup\\target\\release\\lookup.exe&quot;,
+      &quot;args&quot;: []
+    }
+  }
+}&apos;>
+                  <svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>copy</span>
+                </button>
+              </div>
+              <pre><code>{
+  "mcpServers": {
+    "Lookup": {
+      "command": "C:\\path\\to\\Lookup\\target\\release\\lookup.exe",
+      "args": []
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <span>Press <kbd style="padding: 2px 4px; border: 1px solid var(--line); border-radius: 3px; font-size: 10px;">ESC</kbd> to close</span>
+        <a class="modal-footer-link" id="view-on-page-btn">
+          <span>Scroll to page view</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+const toggleBtn = document.getElementById("theme-toggle");
+
+      function getCurrentTheme() {
+        return document.documentElement.getAttribute("data-theme") || "dark";
+      }
+
+      function updateThemeAttrs(newTheme) {
+        document.documentElement.setAttribute("data-theme", newTheme);
+        try {
+          localStorage.setItem("lookup-theme", newTheme);
+        } catch (e) {}
+        if (toggleBtn) {
+          toggleBtn.setAttribute(
+            "aria-label",
+            "Switch to " + (newTheme === "dark" ? "light" : "dark") + " theme"
+          );
+        }
+      }
+
+      function triggerBurst() {
+        if (!toggleBtn) return;
+        toggleBtn.classList.remove("animating");
+        void toggleBtn.offsetWidth;
+        toggleBtn.classList.add("animating");
+        setTimeout(() => {
+          toggleBtn.classList.remove("animating");
+        }, 750);
+      }
+
+      let isTogglingTheme = false;
+
+      async function toggleTheme(e) {
+        if (isTogglingTheme) return;
+        isTogglingTheme = true;
+
+        const currentTheme = getCurrentTheme();
+        const nextTheme = currentTheme === "dark" ? "light" : "dark";
+
+        triggerBurst();
+
+        if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          updateThemeAttrs(nextTheme);
+          const activeBtn = document.querySelector(".tab-btn.active");
+          if (activeBtn) updateGlider(activeBtn);
+          isTogglingTheme = false;
+          return;
+        }
+
+        const rect = toggleBtn.getBoundingClientRect();
+        const x = e && e.clientX && e.clientX > 0 ? e.clientX : rect.left + rect.width / 2;
+        const y = e && e.clientY && e.clientY > 0 ? e.clientY : rect.top + rect.height / 2;
+
+        const endRadius = Math.hypot(
+          Math.max(x, window.innerWidth - x),
+          Math.max(y, window.innerHeight - y)
+        );
+
+        try {
+          const transition = document.startViewTransition(() => {
+            updateThemeAttrs(nextTheme);
+            const activeBtn = document.querySelector(".tab-btn.active");
+            if (activeBtn) updateGlider(activeBtn);
+          });
+
+          await transition.ready;
+
+          const anim = document.documentElement.animate(
+            {
+              clipPath: [
+                "circle(0px at " + x + "px " + y + "px)",
+                "circle(" + endRadius + "px at " + x + "px " + y + "px)"
+              ]
+            },
+            {
+              duration: 650,
+              easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+              pseudoElement: "::view-transition-new(root)"
+            }
+          );
+
+          await anim.finished;
+        } catch (err) {
+          updateThemeAttrs(nextTheme);
+          const activeBtn = document.querySelector(".tab-btn.active");
+          if (activeBtn) updateGlider(activeBtn);
+        } finally {
+          isTogglingTheme = false;
+        }
+      }
+
+      if (toggleBtn) {
+        toggleBtn.addEventListener("click", toggleTheme);
+      }
+
+      const tabNav = document.querySelector(".tab-nav");
+      const tabGlider = document.getElementById("tab-glider");
+      const tabBtns = document.querySelectorAll(".tab-btn");
+      const tabPanels = document.querySelectorAll(".tab-panel");
+
+      function updateGlider(btn) {
+        if (!tabGlider || !btn) return;
+        tabGlider.style.transform = "translateX(" + btn.offsetLeft + "px)";
+        tabGlider.style.width = btn.offsetWidth + "px";
+      }
+
+      function detectUserOS() {
+        try {
+          const stored = localStorage.getItem("lookup-install-tab");
+          if (stored) return stored;
+        } catch (e) {}
+        const ua = navigator.userAgent || "";
+        const platform = navigator.userAgentData?.platform || navigator.platform || "";
+        if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+          return "windows";
+        }
+        return "unix";
+      }
+
+      let currentOS = detectUserOS();
+
+      function selectPlatform(os) {
+        currentOS = os;
+        try {
+          localStorage.setItem("lookup-install-tab", os);
+        } catch (e) {}
+
+        const cardUnix = document.getElementById("modal-card-unix");
+        const cardWin = document.getElementById("modal-card-windows");
+        const modalPanelUnix = document.getElementById("modal-panel-unix");
+        const modalPanelWin = document.getElementById("modal-panel-windows");
+
+        if (os === "windows") {
+          cardWin?.classList.add("active");
+          cardUnix?.classList.remove("active");
+          if (modalPanelWin) modalPanelWin.style.display = "block";
+          if (modalPanelUnix) modalPanelUnix.style.display = "none";
+        } else {
+          cardUnix?.classList.add("active");
+          cardWin?.classList.remove("active");
+          if (modalPanelUnix) modalPanelUnix.style.display = "block";
+          if (modalPanelWin) modalPanelWin.style.display = "none";
+        }
+
+        let activeBtn = null;
+        tabBtns.forEach((btn) => {
+          if (btn.getAttribute("data-target") === os) {
+            btn.classList.add("active");
+            activeBtn = btn;
+          } else {
+            btn.classList.remove("active");
+          }
+        });
+
+        if (activeBtn) {
+          updateGlider(activeBtn);
+        }
+
+        tabPanels.forEach((panel) => {
+          if (panel.id === "panel-" + os) {
+            panel.classList.add("active");
+          } else {
+            panel.classList.remove("active");
+          }
+        });
+      }
+
+      selectPlatform(currentOS);
+
+      window.addEventListener("load", () => {
+        const activeBtn = document.querySelector(".tab-btn.active");
+        if (activeBtn) updateGlider(activeBtn);
+      });
+      window.addEventListener("resize", () => {
+        const activeBtn = document.querySelector(".tab-btn.active");
+        if (activeBtn) updateGlider(activeBtn);
+      });
+
+      const modal = document.getElementById("install-modal");
+      const openModalBtn = document.getElementById("open-install-popup");
+      const closeModalBtn = document.getElementById("close-install-modal");
+      const viewOnPageBtn = document.getElementById("view-on-page-btn");
+
+      function openModal() {
+        if (!modal) return;
+        modal.classList.add("open");
+        modal.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+      }
+
+      function closeModal() {
+        if (!modal) return;
+        modal.classList.remove("open");
+        modal.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = "";
+      }
+
+      if (openModalBtn) {
+        openModalBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          openModal();
+        });
+      }
+
+      if (closeModalBtn) {
+        closeModalBtn.addEventListener("click", closeModal);
+      }
+
+      if (modal) {
+        modal.addEventListener("click", (e) => {
+          if (e.target === modal) {
+            closeModal();
+          }
+        });
+      }
+
+      if (viewOnPageBtn) {
+        viewOnPageBtn.addEventListener("click", () => {
+          closeModal();
+          const installSec = document.getElementById("install");
+          if (installSec) {
+            installSec.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        });
+      }
+
+      const modalCardUnix = document.getElementById("modal-card-unix");
+      const modalCardWin = document.getElementById("modal-card-windows");
+
+      if (modalCardUnix) {
+        modalCardUnix.addEventListener("click", () => selectPlatform("unix"));
+      }
+      if (modalCardWin) {
+        modalCardWin.addEventListener("click", () => selectPlatform("windows"));
+      }
+
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const target = btn.getAttribute("data-target");
+          if (target === "manual") {
+            try {
+              localStorage.setItem("lookup-install-tab", "manual");
+            } catch (e) {}
+            document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+            document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+            btn.classList.add("active");
+            updateGlider(btn);
+            document.getElementById("panel-manual")?.classList.add("active");
+          } else {
+            selectPlatform(target);
+          }
+        });
+      });
+
+      const copyIconSvg = `<svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+      const checkIconSvg = `<svg class="copy-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+      document.querySelectorAll(".copy-button").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const textToCopy = btn.getAttribute("data-copy");
+          if (!textToCopy) return;
+
+          try {
+            await navigator.clipboard.writeText(textToCopy);
+            btn.innerHTML = checkIconSvg + "<span>copied!</span>";
+            btn.classList.add("copied");
+
+            setTimeout(() => {
+              btn.innerHTML = copyIconSvg + "<span>copy</span>";
+              btn.classList.remove("copied");
+            }, 2000);
+          } catch (err) {
+            console.error("Failed to copy", err);
+          }
+        });
+      });
+
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modal?.classList.contains("open")) {
+          closeModal();
+          return;
+        }
+
+        if (
+          e.key.toLowerCase() === "t" &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          !modal?.classList.contains("open") &&
+          !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)
+        ) {
+          toggleTheme();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
