@@ -3,107 +3,126 @@
 
 $ErrorActionPreference = "Stop"
 
-function Write-Info {
-    param([string]$Message)
-    Write-Host $Message
+function Pause-Setup {
+    Write-Host ""
+    Read-Host "Press Enter to close"
 }
 
-function Write-Fatal {
+function Fail {
     param([string]$Message)
-    Write-Error $Message
+
+    Write-Host ""
+    Write-Host "Error: $Message"
+    Pause-Setup
     exit 1
 }
 
 $ProjectDir = $PSScriptRoot
+
 if (-not $ProjectDir) {
     $ProjectDir = (Get-Location).Path
 }
 
-# 1. Locate or install Cargo
-$CargoCmd = Get-Command "cargo" -ErrorAction SilentlyContinue
-$CargoBin = if ($CargoCmd) { $CargoCmd.Source } else { $null }
+try {
+    $CargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+    $CargoBin = if ($CargoCmd) { $CargoCmd.Source } else { $null }
 
-if (-not $CargoBin) {
-    $UserCargo = Join-Path $HOME ".cargo\bin\cargo.exe"
-    if (Test-Path $UserCargo) {
-        $CargoBin = $UserCargo
-        $env:PATH = "$HOME\.cargo\bin;" + $env:PATH
-    }
-}
-
-if (-not $CargoBin) {
-    Write-Info "Rust/Cargo was not found; downloading rustup-init for Windows..."
-    
-    $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("lookup-setup-" + [System.Guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
-    $Installer = Join-Path $TempDir "rustup-init.exe"
-
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $WebClient = New-Object System.Net.WebClient
-        $WebClient.DownloadFile("https://win.rustup.rs/x86_64", $Installer)
-
-        Write-Info "Installing Rust toolchain (minimal profile)..."
-        $Process = Start-Process -FilePath $Installer -ArgumentList "-y", "--default-toolchain", "stable", "--profile", "minimal" -NoNewWindow -Wait -PassThru
-
-        if ($Process.ExitCode -ne 0) {
-            Write-Fatal "rustup-init failed with exit code $($Process.ExitCode)."
-        }
-
+    if (-not $CargoBin) {
         $UserCargo = Join-Path $HOME ".cargo\bin\cargo.exe"
+
         if (Test-Path $UserCargo) {
             $CargoBin = $UserCargo
             $env:PATH = "$HOME\.cargo\bin;" + $env:PATH
-        } else {
-            Write-Fatal "Rust installed, but cargo.exe could not be found at $UserCargo."
+        }
+    }
+
+    if (-not $CargoBin) {
+        Write-Host "Cargo not found. Installing Rust..."
+
+        $TempDir = Join-Path `
+            ([System.IO.Path]::GetTempPath()) `
+            ("lookup-" + [System.Guid]::NewGuid().ToString("N"))
+
+        New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+        $Installer = Join-Path $TempDir "rustup-init.exe"
+
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+            $WebClient = New-Object System.Net.WebClient
+            $WebClient.DownloadFile(
+                "https://win.rustup.rs/x86_64",
+                $Installer
+            )
+
+            & $Installer -y --default-toolchain stable --profile minimal
+
+            if ($LASTEXITCODE -ne 0) {
+                Fail "Rust installation failed."
+            }
+
+            $UserCargo = Join-Path $HOME ".cargo\bin\cargo.exe"
+
+            if (-not (Test-Path $UserCargo)) {
+                Fail "cargo.exe was not found after installing Rust."
+            }
+
+            $CargoBin = $UserCargo
+            $env:PATH = "$HOME\.cargo\bin;" + $env:PATH
+        }
+        finally {
+            Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Write-Host "Building Lookup..."
+
+    Push-Location $ProjectDir
+
+    try {
+        & $CargoBin build --release
+
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Build failed."
         }
     }
     finally {
-        if (Test-Path $TempDir) {
-            Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
-        }
+        Pop-Location
     }
-}
 
-Write-Info "Using Cargo: $CargoBin"
-Write-Info "Building Lookup release binary..."
+    $LookupBin = Join-Path $ProjectDir "target\release\lookup.exe"
 
-Push-Location $ProjectDir
-try {
-    & $CargoBin build --release
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fatal "Cargo build failed with exit code $LASTEXITCODE."
+    if (-not (Test-Path $LookupBin)) {
+        Fail "lookup.exe was not found."
     }
+
+    Write-Host "Checking MCP server..."
+
+    $InitJson = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+    $CheckOutput = $InitJson | & $LookupBin
+
+    if (-not $CheckOutput -or -not ($CheckOutput -match '"serverInfo"')) {
+        Fail "Lookup did not return a valid MCP initialize response."
+    }
+
+    $EscapedPath = $LookupBin.Replace('\', '\\')
+
+    Write-Host ""
+    Write-Host "Lookup is ready."
+    Write-Host ""
+    Write-Host "Add this to your MCP config:"
+    Write-Host ""
+    Write-Host "{"
+    Write-Host '  "mcpServers": {'
+    Write-Host '    "Lookup": {'
+    Write-Host "      `"command`": `"$EscapedPath`","
+    Write-Host '      "args": []'
+    Write-Host '    }'
+    Write-Host '  }'
+    Write-Host "}"
 }
-finally {
-    Pop-Location
+catch {
+    Fail $_.Exception.Message
 }
 
-$LookupBin = Join-Path $ProjectDir "target\release\lookup.exe"
-if (-not (Test-Path $LookupBin)) {
-    Write-Fatal "Lookup binary was not found at $LookupBin."
-}
-
-Write-Info "Running an MCP startup check..."
-$InitJson = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-$CheckOutput = $InitJson | & $LookupBin
-
-if (-not $CheckOutput -or -not ($CheckOutput -match '"serverInfo"')) {
-    Write-Fatal "MCP startup check did not receive a valid initialize response."
-}
-
-# Format escaped path for JSON
-$EscapedPath = $LookupBin.Replace('\', '\\')
-
-Write-Info ""
-Write-Info "Lookup is ready."
-Write-Info ""
-Write-Info "Configuration:"
-Write-Info "{"
-Write-Info '  "mcpServers": {'
-Write-Info '    "Lookup": {'
-Write-Info "      `"command`": `"$EscapedPath`","
-Write-Info '      "args": []'
-Write-Info '    }'
-Write-Info '  }'
-Write-Info "}"
+Pause-Setup
