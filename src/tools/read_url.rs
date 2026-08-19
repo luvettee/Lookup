@@ -14,7 +14,7 @@ pub async fn read_url(args: &HashMap<String, Value>) -> Result<Value, String> {
         _ => return Err("url must not be empty".to_string()),
     };
 
-    let valid_url = validate_url(raw_url, false)?;
+    let valid_url = validate_url(raw_url, true)?;
 
     let provider = match args.get("provider").and_then(|v| v.as_str()) {
         Some(p) => {

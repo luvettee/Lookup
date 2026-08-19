@@ -225,7 +225,7 @@ pub async fn direct_fetch(url: &str, max_chars: usize) -> Result<ParsedPage, Str
 }
 
 pub async fn fetch_provider(provider: &str, url: &str, max_chars: usize) -> Result<ParsedPage, String> {
-    let safe_url = validate_url(url, false)?;
+    let safe_url = validate_url(url, true)?;
 
     if provider == "auto" {
         let mut errors = HashMap::new();

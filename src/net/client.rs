@@ -190,9 +190,9 @@ pub async fn fetch_html(
     max_chars: usize,
     timeout: Option<Duration>,
 ) -> Result<HtmlResponse, String> {
-    let safe_url = validate_url(url, false)?;
+    let safe_url = validate_url(url, true)?;
     let client = get_client();
-    let max_bytes = MAX_HTML_RESPONSE_BYTES.min(64_000.max(max_chars * 8));
+    let max_bytes = MAX_HTML_RESPONSE_BYTES.min(64_000.max(max_chars.saturating_mul(8)));
 
     let mut req = client.get(&safe_url);
     if let Some(t) = timeout {

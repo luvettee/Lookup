@@ -182,7 +182,9 @@ fn bdecode_internal<'a>(
         .map_err(|_| "invalid torrent string length".to_string())?;
 
     let str_start = colon_idx + 1;
-    let str_end = str_start + len;
+    let str_end = str_start
+        .checked_add(len)
+        .ok_or_else(|| "invalid torrent string length".to_string())?;
     if str_end > data.len() {
         return Err("invalid torrent string length".to_string());
     }
@@ -253,7 +255,9 @@ pub fn parse_torrent(data: &[u8]) -> Result<TorrentInfo, String> {
                                 if fk == b"length" {
                                     if let BencodeValue::Int(flen) = fv {
                                         if flen > 0 {
-                                            total += flen as u64;
+                                            total = total
+                                                .checked_add(flen as u64)
+                                                .ok_or_else(|| "invalid torrent size".to_string())?;
                                         }
                                     }
                                 }
