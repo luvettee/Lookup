@@ -122,10 +122,59 @@ fn is_global_ipv6(ip: &Ipv6Addr) -> bool {
     true
 }
 
+pub async fn resolve_host_async(host: &str, port: u16) -> Result<Vec<IpAddr>, String> {
+    let now = Instant::now();
+    {
+        let cache = DNS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = cache.get(host) {
+            if entry.expires_at > now {
+                return Ok(entry.ips.clone());
+            }
+        }
+    }
+
+    let socket_str = format!("{}:{}", host, port);
+    let ips: Vec<IpAddr> = match tokio::net::lookup_host(&socket_str).await {
+        Ok(iter) => {
+            let mut resolved: Vec<IpAddr> = iter.map(|s| s.ip()).collect();
+            resolved.sort();
+            resolved.dedup();
+            resolved
+        }
+        Err(_) => return Err("URL hostname could not be resolved".to_string()),
+    };
+
+    if ips.is_empty() {
+        return Err("URL hostname could not be resolved".to_string());
+    }
+
+    {
+        let mut cache = DNS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if cache.len() >= DNS_CACHE_MAX_ENTRIES {
+            let oldest = cache
+                .iter()
+                .min_by_key(|(_, entry)| entry.expires_at)
+                .map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                cache.remove(&k);
+            }
+        }
+        cache.insert(
+            host.to_string(),
+            DnsCacheEntry {
+                expires_at: now + std::time::Duration::from_secs(DNS_CACHE_TTL_SECS),
+                ips: ips.clone(),
+            },
+        );
+    }
+
+    Ok(ips)
+}
+
 pub fn resolve_host(host: &str, port: u16) -> Result<Vec<IpAddr>, String> {
     let now = Instant::now();
     {
-        let cache = DNS_CACHE.lock().unwrap();
+        let cache = DNS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = cache.get(host) {
             if entry.expires_at > now {
                 return Ok(entry.ips.clone());
@@ -148,7 +197,7 @@ pub fn resolve_host(host: &str, port: u16) -> Result<Vec<IpAddr>, String> {
     ips.dedup();
 
     {
-        let mut cache = DNS_CACHE.lock().unwrap();
+        let mut cache = DNS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if cache.len() >= DNS_CACHE_MAX_ENTRIES {
             let oldest = cache
                 .iter()
@@ -170,7 +219,7 @@ pub fn resolve_host(host: &str, port: u16) -> Result<Vec<IpAddr>, String> {
     Ok(ips)
 }
 
-pub fn validate_url(raw: &str, resolve_dns: bool) -> Result<String, String> {
+pub fn validate_url_syntax(raw: &str) -> Result<String, String> {
     let url_str = raw.trim();
     if url_str.is_empty() {
         return Err("url must not be empty".to_string());
@@ -203,13 +252,56 @@ pub fn validate_url(raw: &str, resolve_dns: bool) -> Result<String, String> {
         return Err("private or local URLs are not allowed".to_string());
     }
 
-    // Direct IP check or DNS resolution
     if let Ok(ip) = host.parse::<IpAddr>() {
         if !is_global_ip(&ip) {
             return Err("private or local URLs are not allowed".to_string());
         }
-    } else if resolve_dns {
-        let port = parsed.port_or_known_default().unwrap_or(if scheme == "https" { 443 } else { 80 });
+    }
+
+    Ok(parsed.to_string())
+}
+
+pub async fn validate_url_async(raw: &str, resolve_dns: bool) -> Result<String, String> {
+    let parsed_str = validate_url_syntax(raw)?;
+    if !resolve_dns || allow_private_urls() {
+        return Ok(parsed_str);
+    }
+
+    let parsed = Url::parse(&parsed_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
+    let host = parsed.host_str().unwrap_or("").trim_end_matches('.').to_lowercase();
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if !is_global_ip(&ip) {
+            return Err("private or local URLs are not allowed".to_string());
+        }
+    } else {
+        let port = parsed.port_or_known_default().unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
+        let ips = resolve_host_async(&host, port).await?;
+        for ip in &ips {
+            if !is_global_ip(ip) {
+                return Err("private or local URLs are not allowed".to_string());
+            }
+        }
+    }
+
+    Ok(parsed_str)
+}
+
+pub fn validate_url(raw: &str, resolve_dns: bool) -> Result<String, String> {
+    let parsed_str = validate_url_syntax(raw)?;
+    if !resolve_dns || allow_private_urls() {
+        return Ok(parsed_str);
+    }
+
+    let parsed = Url::parse(&parsed_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
+    let host = parsed.host_str().unwrap_or("").trim_end_matches('.').to_lowercase();
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if !is_global_ip(&ip) {
+            return Err("private or local URLs are not allowed".to_string());
+        }
+    } else {
+        let port = parsed.port_or_known_default().unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
         let ips = resolve_host(&host, port)?;
         for ip in &ips {
             if !is_global_ip(ip) {
@@ -218,7 +310,7 @@ pub fn validate_url(raw: &str, resolve_dns: bool) -> Result<String, String> {
         }
     }
 
-    Ok(parsed.to_string())
+    Ok(parsed_str)
 }
 
 pub fn normalize_url_key(url_str: &str) -> String {

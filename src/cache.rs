@@ -45,7 +45,6 @@ impl LruCache {
     }
 
     fn get(&mut self, key: &str, now: Instant) -> Option<serde_json::Value> {
-        self.purge_expired(now);
         if let Some(entry) = self.entries.get_mut(key) {
             if entry.expires_at > now {
                 entry.last_accessed = now;
@@ -71,8 +70,10 @@ impl LruCache {
                 value: value.clone(),
             },
         );
-        self.purge_expired(now);
-        self.evict_if_full();
+        if self.entries.len() > MAX_CACHE_ENTRIES {
+            self.purge_expired(now);
+            self.evict_if_full();
+        }
         value
     }
 }

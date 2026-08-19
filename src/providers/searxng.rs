@@ -488,11 +488,13 @@ fn score_searxng_item(item: &Value, terms: &[String], travel_intent: bool) -> us
 }
 
 pub async fn searxng_search(params: &HashMap<String, String>) -> Result<Value, String> {
-    let mut query_params = form_urlencoded::Serializer::new(String::new());
-    for (k, v) in params {
-        query_params.append_pair(k, v);
-    }
-    let encoded = query_params.finish();
+    let encoded = {
+        let mut query_params = form_urlencoded::Serializer::new(String::new());
+        for (k, v) in params {
+            query_params.append_pair(k, v);
+        }
+        query_params.finish()
+    };
 
     // 1. Check configured instances
     let configured_urls = searxng_urls();
@@ -565,11 +567,13 @@ pub async fn searxng_search(params: &HashMap<String, String>) -> Result<Value, S
     // Relax time_range if public instance returned no results
     let mut relaxed_params = params.clone();
     let requested_recency = relaxed_params.remove("time_range");
-    let mut relaxed_query_params = form_urlencoded::Serializer::new(String::new());
-    for (k, v) in &relaxed_params {
-        relaxed_query_params.append_pair(k, v);
-    }
-    let relaxed_encoded = relaxed_query_params.finish();
+    let relaxed_encoded = {
+        let mut relaxed_query_params = form_urlencoded::Serializer::new(String::new());
+        for (k, v) in &relaxed_params {
+            relaxed_query_params.append_pair(k, v);
+        }
+        relaxed_query_params.finish()
+    };
     let relaxed_public = public_searxng_candidates().await;
 
     if let Ok(mut relaxed) = search_searxng_waves(&relaxed_public, &relaxed_encoded, SEARX_PUBLIC_VALIDATION_BUDGET, false).await {

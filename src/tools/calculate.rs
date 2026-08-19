@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::f64::consts::{E, PI};
 use serde_json::{json, Value};
 
-const MAX_EXPRESSION_CHARS: usize = 200;
-const MAX_AST_NODES: usize = 64;
-const MAX_AST_DEPTH: usize = 12;
+const MAX_EXPRESSION_CHARS: usize = 4096;
+const MAX_AST_NODES: usize = 512;
+const MAX_AST_DEPTH: usize = 64;
 const MAX_EXPONENT: f64 = 1000.0;
 const MAX_ABS_NUMBER: f64 = 1e100;
 

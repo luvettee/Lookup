@@ -553,19 +553,22 @@ async fn torznab_search(query: &str, count: usize) -> Vec<Value> {
 }
 
 async fn internet_archive_torrents(query: &str, count: usize) -> Vec<Value> {
-    let mut params = form_urlencoded::Serializer::new(String::new());
-    params.append_pair(
-        "q",
-        &format!("({}) AND mediatype:(software OR texts OR audio OR movies)", query),
-    );
-    params.append_pair("fl[]", "identifier");
-    params.append_pair("fl[]", "title");
-    params.append_pair("fl[]", "item_size");
-    params.append_pair("rows", &count.to_string());
-    params.append_pair("page", "1");
-    params.append_pair("output", "json");
+    let query_encoded = {
+        let mut params = form_urlencoded::Serializer::new(String::new());
+        params.append_pair(
+            "q",
+            &format!("({}) AND mediatype:(software OR texts OR audio OR movies)", query),
+        );
+        params.append_pair("fl[]", "identifier");
+        params.append_pair("fl[]", "title");
+        params.append_pair("fl[]", "item_size");
+        params.append_pair("rows", &count.to_string());
+        params.append_pair("page", "1");
+        params.append_pair("output", "json");
+        params.finish()
+    };
 
-    let url = format!("https://archive.org/advancedsearch.php?{}", params.finish());
+    let url = format!("https://archive.org/advancedsearch.php?{}", query_encoded);
     let mut results = Vec::new();
 
     if let Ok(data) = get_json(&url, Some(NETWORK_TIMEOUT), None, None).await {

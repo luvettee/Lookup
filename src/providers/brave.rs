@@ -85,24 +85,27 @@ pub async fn search_brave(
         return Err("Brave queries must be at most 400 characters and 50 words".to_string());
     }
 
-    let mut params = form_urlencoded::Serializer::new(String::new());
-    params.append_pair("q", &q);
-    params.append_pair("count", &count.to_string());
-    params.append_pair("search_lang", "en");
-    params.append_pair("safesearch", if news { "strict" } else { "moderate" });
+    let query_params_str = {
+        let mut params = form_urlencoded::Serializer::new(String::new());
+        params.append_pair("q", &q);
+        params.append_pair("count", &count.to_string());
+        params.append_pair("search_lang", "en");
+        params.append_pair("safesearch", if news { "strict" } else { "moderate" });
 
-    if let Some(rec) = recency {
-        if let Some(freshness) = brave_freshness(rec) {
-            params.append_pair("freshness", freshness);
+        if let Some(rec) = recency {
+            if let Some(freshness) = brave_freshness(rec) {
+                params.append_pair("freshness", freshness);
+            }
         }
-    }
+        params.finish()
+    };
 
     let endpoint = if news {
         BRAVE_NEWS_SEARCH_URL
     } else {
         BRAVE_WEB_SEARCH_URL
     };
-    let url = format!("{}?{}", endpoint, params.finish());
+    let url = format!("{}?{}", endpoint, query_params_str);
 
     let mut headers = HashMap::new();
     headers.insert("X-Subscription-Token".to_string(), key);

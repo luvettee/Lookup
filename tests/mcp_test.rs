@@ -9,7 +9,10 @@ fn test_mcp_initialize() {
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 1);
     assert_eq!(resp["result"]["serverInfo"]["name"], "lookup");
-    assert_eq!(resp["result"]["protocolVersion"], "2024-11-05");
+    assert_eq!(resp["result"]["protocolVersion"], LATEST_STABLE_PROTOCOL_VERSION);
+
+    let negotiated = make_initialize_response_for_protocol(Some(json!(1)), Some("2024-11-05")).unwrap();
+    assert_eq!(negotiated["result"]["protocolVersion"], "2024-11-05");
 }
 
 #[test]
@@ -65,4 +68,37 @@ async fn test_mcp_dispatch_current_time() {
     let res = dispatch_tool("current_time", &args).await.unwrap();
     assert_eq!(res["timezone"], "UTC");
     assert!(res["iso"].as_str().unwrap().contains("+00:00") || res["iso"].as_str().unwrap().contains("Z"));
+}
+
+#[tokio::test]
+async fn test_mcp_dispatch_current_time_default_local() {
+    let args = HashMap::new();
+    let res = dispatch_tool("current_time", &args).await.unwrap();
+    assert!(!res["timezone"].as_str().unwrap().is_empty());
+    assert!(!res["iso"].as_str().unwrap().is_empty());
+    assert!(!res["date"].as_str().unwrap().is_empty());
+    assert!(!res["time"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_mcp_dispatch_calculate_long_expression() {
+    let long_expr = (0..50).map(|_| "1").collect::<Vec<_>>().join(" + ");
+    let mut args = HashMap::new();
+    args.insert("expression".to_string(), json!(long_expr));
+
+    let res = dispatch_tool("calculate", &args).await.unwrap();
+    assert_eq!(res["result"], 50);
+}
+
+#[test]
+fn test_cache_lru_and_expiration() {
+    use lookup::cache::{cache_get, cache_put};
+    use std::time::Duration;
+
+    let key = "test_key_12345";
+    let val = json!({"hello": "world"});
+    cache_put(key, Duration::from_secs(60), val.clone());
+
+    let fetched = cache_get(key);
+    assert_eq!(fetched, Some(val));
 }
