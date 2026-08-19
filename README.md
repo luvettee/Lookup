@@ -1,72 +1,86 @@
 # Lookup
 
-Lookup is a lightweight MCP server for web and torrent search, page reading,
+Lookup is a high-performance, lightweight MCP server rewritten in Rust for web and torrent search, page reading,
 research, news, weather, time, calculations, and unit conversion. It is designed
 for LM Studio and other MCP clients that work with local models.
 
 ## Setup
 
-Lookup is not installed as a Python package. LM Studio launches `Search.py`
-directly with a Python interpreter. Keyless mode uses only Python's standard
-library.
+Lookup compiles directly to a native release binary. Keyless mode operates with zero external dependencies.
 
-The setup script supports macOS and Linux. It installs
-[`uv`](https://docs.astral.sh/uv/) for the current user when needed, lets `uv`
-install Python when needed, creates `.venv`, and checks `Search.py` directly.
-It does not build or install Lookup, and no lockfile is required.
+### macOS & Linux
+
+The setup script ensures Rust/Cargo is installed (via `rustup` if needed), builds the release binary, and performs an MCP startup check:
 
 ```sh
 chmod +x setup.sh
 ./setup.sh
 ```
 
-No `sudo` is required. The bootstrap needs either `curl` or `wget` and an
-internet connection the first time it runs.
+No `sudo` is required.
 
-At the end, the script prints an MCP configuration containing the exact
-executable path for this checkout. It looks like this:
+### Windows
+
+Run PowerShell or Command Prompt as your standard user:
+
+```powershell
+# PowerShell
+.\setup.ps1
+```
+
+Or from CMD / double-click:
+
+```cmd
+setup.cmd
+```
+
+The script automatically downloads `rustup-init.exe` if `cargo` is not present, builds the release binary, and outputs the MCP configuration.
+
+### MCP Configuration
+
+At the end of setup, the script prints an MCP configuration containing the exact executable path for your system:
 
 ```json
 {
   "mcpServers": {
     "Lookup": {
-      "command": "/absolute/path/to/Lookup/.venv/bin/python",
-      "args": ["/absolute/path/to/Lookup/Search.py"]
+      "command": "/absolute/path/to/Lookup/target/release/lookup",
+      "args": []
     }
   }
 }
 ```
 
+On Windows, paths will use backslashes (e.g. `C:\\path\\to\\Lookup\\target\\release\\lookup.exe`).
+
 Copy that configuration into LM Studio or your MCP client, then restart or
 reload the client.
+
+### Manual Build
+
+If `cargo` is already installed on your system:
+
+```sh
+cargo build --release
+```
+
+The compiled executable will be located at `target/release/lookup` (or `target\release\lookup.exe` on Windows).
 
 ### Update
 
 Run the updater from the Lookup folder:
 
 ```sh
+# macOS / Linux
 ./update.sh
+
+# Windows
+.\update.ps1
+# or
+update.cmd
 ```
 
-The updater downloads only the newest `Search.py` from the repository's `main`
-branch, validates it, performs an MCP startup check, and then replaces the local
-source. It does not use GitHub Releases or modify `.venv`, `mcp.json`, API keys,
-the README, or other local files.
-
-### Use an existing Python
-
-If Python 3.9 or newer is already installed, `uv` and `.venv` are optional. Use
-the path returned by `command -v python3` as `command`, with the absolute path
-to `Search.py` in `args`.
-
-### Manual environment
-
-If `uv` is already installed:
-
-```sh
-uv venv --python 3.12
-.venv/bin/python Search.py
-```
+The updater pulls the latest source and rebuilds the optimized release binary.
 
 ## Tools
 
@@ -89,7 +103,7 @@ torrent or magnet link are automatically routed through torrent-aware search.
 
 ## Search providers
 
-Lookup works without API keys:
+Lookup works out-of-the-box without API keys:
 
 - SearXNG provides web search.
 - Direct HTTP extraction reads webpages.
@@ -98,15 +112,15 @@ Lookup works without API keys:
 
 Public SearXNG instances are best effort. For more predictable service, set a
 trusted instance or enable an optional provider. Exa and Brave use their HTTP
-APIs directly and do not require additional Python packages.
+APIs directly.
 
 | Provider | Search | Read pages | Configuration |
 |---|:---:|:---:|---|
 | SearXNG | Yes | No | `SEARXNG_URL` (optional) |
 | Brave | Yes | No | `BRAVE_API_KEY` |
 | Exa | Yes | No | `EXA_API_KEY` |
-| Ollama | Yes | Yes | `OLLAMA_API_KEY` and the `ollama` package |
-| Tavily | Yes | Yes | `TAVILY_API_KEY` and the `tavily-python` package |
+| Ollama | Yes | Yes | `OLLAMA_API_KEY` (and optional `OLLAMA_HOST`) |
+| Tavily | Yes | Yes | `TAVILY_API_KEY` |
 | Direct | No | Yes | None |
 
 Set `provider` to `exa` in `web_search`, `search_and_fetch`, `research`, or
@@ -114,21 +128,14 @@ Set `provider` to `exa` in `web_search`, `search_and_fetch`, `research`, or
 configured fallback before keyless SearXNG. Domain and recency filters are
 passed to Exa's native search filters.
 
-Install an optional provider library into `.venv` with:
-
-```sh
-uv pip install --python .venv/bin/python ollama
-uv pip install --python .venv/bin/python tavily-python
-```
-
 Add keys or provider settings to the MCP server's `env` object:
 
 ```json
 {
   "mcpServers": {
     "Lookup": {
-      "command": "/absolute/path/to/Lookup/.venv/bin/python",
-      "args": ["/absolute/path/to/Lookup/Search.py"],
+      "command": "/absolute/path/to/Lookup/target/release/lookup",
+      "args": [],
       "env": {
         "EXA_API_KEY": "your-exa-key",
         "BRAVE_API_KEY": "your-key",
@@ -180,12 +187,13 @@ the source; it is not a legal or content-safety determination.
 | `BRAVE_API_KEY` | Enable Brave Search |
 | `EXA_API_KEY` | Enable Exa Search |
 | `OLLAMA_API_KEY` | Enable Ollama search and extraction |
+| `OLLAMA_HOST` | Ollama API base URL (default: `https://api.ollama.com` or local) |
 | `TAVILY_API_KEY` | Enable Tavily search and extraction |
 | `SEARXNG_URL` | Preferred SearXNG instance or comma-separated instances |
 | `TORZNAB_URLS` | Comma-separated Torznab API endpoints |
 | `TORRENT_SITE_URLS` | Extra HTML indexer templates containing `{query}` |
 | `LOOKUP_ALLOW_PRIVATE_URLS` | Allow requests to local and private addresses |
-| `LOOKUP_LOG_LEVEL` | Logging level, such as `INFO` or `DEBUG` |
+| `LOOKUP_LOG_LEVEL` | Logging level, such as `INFO` or `DEBUG` (default: `WARN`) |
 | `TZ` | Fallback local timezone |
 
 Private, loopback, local, and link-local destinations are blocked by default to
@@ -206,7 +214,7 @@ Find the official Debian torrent.
 Run the MCP server directly with:
 
 ```sh
-.venv/bin/python Search.py
+./target/release/lookup
 ```
 
 Lookup caches repeated requests in memory, limits output size, cools down failing

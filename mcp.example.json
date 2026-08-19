@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "Lookup": {
-      "command": "/absolute/path/to/Lookup/.venv/bin/python",
-      "args": [
-        "/absolute/path/to/Lookup/Search.py"
-      ]
+      "command": "/absolute/path/to/Lookup/target/release/lookup",
+      "args": []
     }
   }
 }
