@@ -160,6 +160,23 @@ last-resort fallback after the existing search providers.
 }
 ```
 
+### Browser Control
+
+Browser control is opt-in: set `LOOKUP_BROWSER_ENABLED=true` to enable it. Lookup
+runs a local Chromium, Chrome, Brave, or Edge browser with an isolated profile;
+it can run headless or visible and does not use a remote browser service. Prefer
+static tools such as `search_and_fetch`, `read_url`, and `screenshot_url` whenever
+they can complete the task.
+
+Tools cover opening/listing/navigating tabs, compact snapshots, clicks, typing,
+keys, scrolling, bounded waits, readable text, screenshots rendered as MCP images
+in chat, history/reload, closing, and size-limited JavaScript evaluation. Lookup can run its isolated
+browser alongside an already-open personal browser. To control tabs in an
+existing browser session, start that browser with a local debugging port and set
+`LOOKUP_BROWSER_DEBUG_URL=http://127.0.0.1:9222`; Lookup imports its open tabs.
+Chrome cannot enable CDP retroactively on a process started without debugging,
+and non-localhost CDP endpoints are always rejected.
+
 ### Exa
 
 Set `EXA_API_KEY` to enable Exa Search. Use `provider: "exa"` in `web_search`,
@@ -247,6 +264,17 @@ the source; it is not a legal or content-safety determination.
 | `LOOKUP_ALLOW_PRIVATE_URLS` | Allow requests to local and private addresses |
 | `LOOKUP_CACHE_DB` | SQLite cache path (default: `.lookup-cache.sqlite3`; use `memory` or `off` to disable persistence) |
 | `LOOKUP_CHROMIUM_PATH` | Path to a local Chromium-based browser executable; overrides Linux, macOS, and Windows auto-detection |
+| `LOOKUP_BROWSER_ENABLED` | Enable opt-in browser control (default: `false`) |
+| `LOOKUP_BROWSER_PATH` | Path to the Chromium, Chrome, Brave, or Edge executable used for browser control |
+| `LOOKUP_BROWSER_HEADLESS` | Run the browser-control session headlessly; set to `false` for a visible browser |
+| `LOOKUP_BROWSER_MAX_TABS` | Maximum number of browser-control tabs |
+| `LOOKUP_BROWSER_ACTION_TIMEOUT_MS` | Browser action timeout in milliseconds |
+| `LOOKUP_BROWSER_NAVIGATION_TIMEOUT_MS` | Browser navigation timeout in milliseconds |
+| `LOOKUP_BROWSER_STARTUP_TIMEOUT_MS` | Browser startup timeout in milliseconds |
+| `LOOKUP_BROWSER_MAX_SNAPSHOT_ELEMENTS` | Maximum elements returned in a browser snapshot |
+| `LOOKUP_BROWSER_MAX_RESPONSE_CHARS` | Maximum characters returned by a browser tool response |
+| `LOOKUP_BROWSER_MAX_JAVASCRIPT_CHARS` | Maximum serialized JavaScript evaluation result size |
+| `LOOKUP_BROWSER_DEBUG_URL` | Existing localhost CDP endpoint to attach to; non-localhost URLs are rejected |
 | `LOOKUP_LOG_LEVEL` | Logging level, such as `INFO` or `DEBUG` (default: `WARN`) |
 | `TZ` | Fallback local timezone |
 

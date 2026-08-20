@@ -80,7 +80,12 @@ fn chromium_candidates() -> Vec<PathBuf> {
             }
         }
 
-        for executable in ["google-chrome", "chromium", "microsoft-edge", "brave-browser"] {
+        for executable in [
+            "google-chrome",
+            "chromium",
+            "microsoft-edge",
+            "brave-browser",
+        ] {
             push_unique(&mut candidates, executable);
         }
     }
@@ -92,11 +97,17 @@ fn chromium_candidates() -> Vec<PathBuf> {
             ("LOCALAPPDATA", "Google/Chrome SxS/Application/chrome.exe"),
             ("LOCALAPPDATA", "Chromium/Application/chrome.exe"),
             ("LOCALAPPDATA", "Microsoft/Edge/Application/msedge.exe"),
-            ("LOCALAPPDATA", "BraveSoftware/Brave-Browser/Application/brave.exe"),
+            (
+                "LOCALAPPDATA",
+                "BraveSoftware/Brave-Browser/Application/brave.exe",
+            ),
             ("PROGRAMFILES", "Google/Chrome/Application/chrome.exe"),
             ("PROGRAMFILES", "Chromium/Application/chrome.exe"),
             ("PROGRAMFILES", "Microsoft/Edge/Application/msedge.exe"),
-            ("PROGRAMFILES", "BraveSoftware/Brave-Browser/Application/brave.exe"),
+            (
+                "PROGRAMFILES",
+                "BraveSoftware/Brave-Browser/Application/brave.exe",
+            ),
             ("PROGRAMFILES(X86)", "Google/Chrome/Application/chrome.exe"),
             ("PROGRAMFILES(X86)", "Microsoft/Edge/Application/msedge.exe"),
         ];
@@ -288,7 +299,10 @@ async fn run_chromium(
 ) -> Result<String, String> {
     let mut child = Command::new(executable)
         .args(options.common_args())
-        .arg(format!("--window-size={},{}", options.viewport.0, options.viewport.1))
+        .arg(format!(
+            "--window-size={},{}",
+            options.viewport.0, options.viewport.1
+        ))
         .arg(format!("--host-resolver-rules={resolver_rules}"))
         .arg("--dump-dom")
         .arg(url)
@@ -337,7 +351,10 @@ async fn run_chromium(
         .map_err(|_| "Chromium rendering timed out".to_string())?
         .map_err(|_| "Chromium process failed".to_string())?;
     if !status.success() {
-        return Err(with_context("Chromium failed to render the page", &stderr_bytes));
+        return Err(with_context(
+            "Chromium failed to render the page",
+            &stderr_bytes,
+        ));
     }
 
     String::from_utf8(output).map_err(|_| "Chromium returned invalid UTF-8".to_string())
@@ -347,7 +364,10 @@ pub async fn render_html(url: &str) -> Result<String, String> {
     render_html_with_options(url, &RenderOptions::default()).await
 }
 
-pub async fn render_html_with_options(url: &str, options: &RenderOptions) -> Result<String, String> {
+pub async fn render_html_with_options(
+    url: &str,
+    options: &RenderOptions,
+) -> Result<String, String> {
     let (safe_url, resolver_rules) = pinned_target(url)?;
     let mut last_error = "Chromium executable was not available".to_string();
 
@@ -376,10 +396,10 @@ fn html_to_text(html: &str) -> String {
     let mut text = String::with_capacity(html.len() / 2);
     let mut in_tag = false;
     let mut skip_depth = 0usize;
-    let mut chars = html.char_indices().peekable();
+    let chars = html.char_indices();
     let bytes = html.as_bytes();
 
-    while let Some((i, c)) = chars.next() {
+    for (i, c) in chars {
         if c == '<' {
             in_tag = true;
             let rest = &html[i..];
@@ -414,7 +434,8 @@ async fn run_screenshot(
     resolver_rules: &str,
     options: &ScreenshotOptions,
 ) -> Result<Vec<u8>, String> {
-    let temp_dir = TempDir::new().map_err(|_| "Could not create screenshot directory".to_string())?;
+    let temp_dir =
+        TempDir::new().map_err(|_| "Could not create screenshot directory".to_string())?;
     let screenshot_path = temp_dir
         .path()
         .join(format!("screenshot.{}", options.format.extension()));
@@ -445,7 +466,9 @@ async fn run_screenshot(
         .ok_or_else(|| "Could not capture Chromium diagnostics".to_string())?;
 
     let wait = timeout(options.render.timeout, async {
-        let stderr_bytes = read_capped(stderr, MAX_STDERR_BYTES).await.unwrap_or_default();
+        let stderr_bytes = read_capped(stderr, MAX_STDERR_BYTES)
+            .await
+            .unwrap_or_default();
         let status = child.wait().await;
         (status, stderr_bytes)
     })
@@ -460,7 +483,10 @@ async fn run_screenshot(
     };
     let status = status_result.map_err(|_| "Chromium screenshot process failed".to_string())?;
     if !status.success() {
-        return Err(with_context("Chromium failed to capture the page", &stderr_bytes));
+        return Err(with_context(
+            "Chromium failed to capture the page",
+            &stderr_bytes,
+        ));
     }
 
     let metadata = std::fs::metadata(&screenshot_path)
@@ -488,7 +514,10 @@ pub async fn screenshot_png(url: &str, width: u32, height: u32) -> Result<Vec<u8
     screenshot_with_options(url, &options).await
 }
 
-pub async fn screenshot_with_options(url: &str, options: &ScreenshotOptions) -> Result<Vec<u8>, String> {
+pub async fn screenshot_with_options(
+    url: &str,
+    options: &ScreenshotOptions,
+) -> Result<Vec<u8>, String> {
     let (safe_url, resolver_rules) = pinned_target(url)?;
     let mut last_error = "Chromium executable was not available".to_string();
 
@@ -544,7 +573,10 @@ async fn run_pdf(
 
     let mut child = Command::new(executable)
         .args(options.common_args())
-        .arg(format!("--window-size={},{}", options.viewport.0, options.viewport.1))
+        .arg(format!(
+            "--window-size={},{}",
+            options.viewport.0, options.viewport.1
+        ))
         .arg(format!("--host-resolver-rules={resolver_rules}"))
         .arg(format!("--print-to-pdf={}", pdf_path.display()))
         .arg(url)
@@ -561,7 +593,9 @@ async fn run_pdf(
         .ok_or_else(|| "Could not capture Chromium diagnostics".to_string())?;
 
     let wait = timeout(options.timeout, async {
-        let stderr_bytes = read_capped(stderr, MAX_STDERR_BYTES).await.unwrap_or_default();
+        let stderr_bytes = read_capped(stderr, MAX_STDERR_BYTES)
+            .await
+            .unwrap_or_default();
         let status = child.wait().await;
         (status, stderr_bytes)
     })
@@ -576,11 +610,14 @@ async fn run_pdf(
     };
     let status = status_result.map_err(|_| "Chromium PDF process failed".to_string())?;
     if !status.success() {
-        return Err(with_context("Chromium failed to export the page as PDF", &stderr_bytes));
+        return Err(with_context(
+            "Chromium failed to export the page as PDF",
+            &stderr_bytes,
+        ));
     }
 
-    let metadata = std::fs::metadata(&pdf_path)
-        .map_err(|_| "Chromium did not produce a PDF".to_string())?;
+    let metadata =
+        std::fs::metadata(&pdf_path).map_err(|_| "Chromium did not produce a PDF".to_string())?;
     if metadata.len() == 0 || metadata.len() > MAX_SCREENSHOT_BYTES {
         return Err("Chromium PDF is empty or too large".to_string());
     }
@@ -629,21 +666,25 @@ app.run()
 "#;
 
 #[cfg(target_os = "macos")]
-async fn run_webkit_screenshot(
-    url: &str,
-    options: &ScreenshotOptions,
-) -> Result<Vec<u8>, String> {
-    let temp_dir = TempDir::new().map_err(|_| "Could not create screenshot directory".to_string())?;
+async fn run_webkit_screenshot(url: &str, options: &ScreenshotOptions) -> Result<Vec<u8>, String> {
+    let temp_dir =
+        TempDir::new().map_err(|_| "Could not create screenshot directory".to_string())?;
     let script_path = temp_dir.path().join("runner.swift");
     let screenshot_path = temp_dir.path().join("screenshot.png");
-    std::fs::write(&script_path, WEBKIT_RUNNER_SCRIPT).map_err(|_| "Could not write runner".to_string())?;
+    std::fs::write(&script_path, WEBKIT_RUNNER_SCRIPT)
+        .map_err(|_| "Could not write runner".to_string())?;
 
     let (width, height) = if options.full_page {
         (options.render.viewport.0, FULL_PAGE_HEIGHT)
     } else {
         options.render.viewport
     };
-    let wait_ms = options.render.wait_after_load.as_millis().max(100).to_string();
+    let wait_ms = options
+        .render
+        .wait_after_load
+        .as_millis()
+        .max(100)
+        .to_string();
 
     let status = timeout(
         options.render.timeout,
@@ -668,11 +709,13 @@ async fn run_webkit_screenshot(
         return Err("WebKit failed to capture the page".to_string());
     }
 
-    let image = std::fs::read(&screenshot_path).map_err(|_| "Could not read WebKit screenshot".to_string())?;
-    if image.is_empty() || image.len() > MAX_SCREENSHOT_BYTES as usize || !options.format.magic_bytes_ok(&image) {
+    let image = std::fs::read(&screenshot_path)
+        .map_err(|_| "Could not read WebKit screenshot".to_string())?;
+    if image.is_empty()
+        || image.len() > MAX_SCREENSHOT_BYTES as usize
+        || !options.format.magic_bytes_ok(&image)
+    {
         return Err("WebKit screenshot is empty or invalid".to_string());
     }
     Ok(image)
 }
-
-

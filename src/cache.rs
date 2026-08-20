@@ -91,7 +91,11 @@ fn open_persistent_cache() -> Option<Connection> {
     let connection = match Connection::open(&path) {
         Ok(connection) => connection,
         Err(error) => {
-            warn!("Could not open SQLite cache at {}: {}", path.display(), error);
+            warn!(
+                "Could not open SQLite cache at {}: {}",
+                path.display(),
+                error
+            );
             return None;
         }
     };
@@ -184,7 +188,10 @@ fn persistent_put(key: &str, ttl: Duration, value: &serde_json::Value) {
         return;
     }
 
-    let _ = connection.execute("DELETE FROM cache_entries WHERE expires_at <= ?1", params![now]);
+    let _ = connection.execute(
+        "DELETE FROM cache_entries WHERE expires_at <= ?1",
+        params![now],
+    );
     let _ = connection.execute(
         "DELETE FROM cache_entries WHERE key IN (
              SELECT key FROM cache_entries
@@ -210,18 +217,22 @@ pub fn cache_get(key: &str) -> Option<serde_json::Value> {
     }
 
     let (value, ttl) = persistent_get(key)?;
-    GLOBAL_CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .put(key.to_string(), ttl, value.clone(), Instant::now());
+    GLOBAL_CACHE.lock().unwrap_or_else(|e| e.into_inner()).put(
+        key.to_string(),
+        ttl,
+        value.clone(),
+        Instant::now(),
+    );
     Some(value)
 }
 
 pub fn cache_put(key: &str, ttl: Duration, value: serde_json::Value) -> serde_json::Value {
-    let cached = GLOBAL_CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .put(key.to_string(), ttl, value, Instant::now());
+    let cached = GLOBAL_CACHE.lock().unwrap_or_else(|e| e.into_inner()).put(
+        key.to_string(),
+        ttl,
+        value,
+        Instant::now(),
+    );
     persistent_put(key, ttl, &cached);
     cached
 }

@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use lookup::protocol::*;
 use lookup::tools::dispatch_tool;
 use serde_json::json;
+use std::collections::HashMap;
 
 #[test]
 fn test_mcp_initialize() {
@@ -9,9 +9,14 @@ fn test_mcp_initialize() {
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 1);
     assert_eq!(resp["result"]["serverInfo"]["name"], "lookup");
-    assert_eq!(resp["result"]["protocolVersion"], LATEST_STABLE_PROTOCOL_VERSION);
+    assert_eq!(
+        resp["result"]["protocolVersion"],
+        LATEST_STABLE_PROTOCOL_VERSION
+    );
+    assert_eq!(resp["result"]["_meta"]["lookup/toolCount"], 28);
 
-    let negotiated = make_initialize_response_for_protocol(Some(json!(1)), Some("2024-11-05")).unwrap();
+    let negotiated =
+        make_initialize_response_for_protocol(Some(json!(1)), Some("2024-11-05")).unwrap();
     assert_eq!(negotiated["result"]["protocolVersion"], "2024-11-05");
 }
 
@@ -19,21 +24,42 @@ fn test_mcp_initialize() {
 fn test_mcp_tools_list() {
     let resp = make_tools_list_response(Some(json!(2))).unwrap();
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 28);
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert!(tool_names.contains(&"web_search"));
-    assert!(tool_names.contains(&"search_and_fetch"));
-    assert!(tool_names.contains(&"read_url"));
-    assert!(tool_names.contains(&"screenshot_url"));
-    assert!(tool_names.contains(&"research"));
-    assert!(tool_names.contains(&"news_search"));
-    assert!(tool_names.contains(&"page_links"));
-    assert!(tool_names.contains(&"weather"));
-    assert!(tool_names.contains(&"current_time"));
-    assert!(tool_names.contains(&"calculate"));
-    assert!(tool_names.contains(&"convert_units"));
-    assert!(tool_names.contains(&"torrent_search"));
+    assert_eq!(
+        tool_names,
+        vec![
+            "web_search",
+            "search_and_fetch",
+            "read_url",
+            "screenshot_url",
+            "research",
+            "news_search",
+            "page_links",
+            "weather",
+            "current_time",
+            "calculate",
+            "convert_units",
+            "torrent_search",
+            "browser_open",
+            "browser_tabs",
+            "browser_navigate",
+            "browser_snapshot",
+            "browser_click",
+            "browser_type",
+            "browser_press",
+            "browser_scroll",
+            "browser_wait",
+            "browser_read",
+            "browser_screenshot",
+            "browser_back",
+            "browser_forward",
+            "browser_reload",
+            "browser_close",
+            "browser_evaluate",
+        ]
+    );
 }
 
 #[tokio::test]
@@ -46,7 +72,10 @@ async fn test_mcp_dispatch_calculate() {
 
     let success_resp = make_tool_success_response(Some(json!(3)), res).unwrap();
     assert_eq!(success_resp["id"], 3);
-    assert!(success_resp["result"]["content"][0]["text"].as_str().unwrap().contains("50"));
+    assert!(success_resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("50"));
 }
 
 #[tokio::test]
@@ -67,7 +96,10 @@ async fn test_mcp_dispatch_current_time() {
 
     let res = dispatch_tool("current_time", &args).await.unwrap();
     assert_eq!(res["timezone"], "UTC");
-    assert!(res["iso"].as_str().unwrap().contains("+00:00") || res["iso"].as_str().unwrap().contains("Z"));
+    assert!(
+        res["iso"].as_str().unwrap().contains("+00:00")
+            || res["iso"].as_str().unwrap().contains("Z")
+    );
 }
 
 #[tokio::test]
@@ -111,11 +143,13 @@ async fn test_mcp_dispatch_screenshot_url() {
     args.insert("height".to_string(), json!(600));
 
     let res = dispatch_tool("screenshot_url", &args).await.unwrap();
-    assert!(res["url"].as_str().unwrap().starts_with("https://example.com"));
+    assert!(res["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("https://example.com"));
     assert_eq!(res["width"], 800);
     assert_eq!(res["height"], 600);
     assert_eq!(res["mime_type"], "image/png");
     assert!(res["size_bytes"].as_u64().unwrap() > 0);
     assert!(res["_mcp_image"]["data"].as_str().unwrap().len() > 0);
 }
-

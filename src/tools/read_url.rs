@@ -1,6 +1,6 @@
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
-use serde_json::{json, Value};
 
 use crate::budget::enforce_output_budget;
 use crate::cache::{cache_get, cache_put};
@@ -19,7 +19,10 @@ pub async fn read_url(args: &HashMap<String, Value>) -> Result<Value, String> {
     let provider = match args.get("provider").and_then(|v| v.as_str()) {
         Some(p) => {
             if !FETCH_PROVIDERS.contains(&p) {
-                return Err(format!("provider must be one of: {}", FETCH_PROVIDERS.join(", ")));
+                return Err(format!(
+                    "provider must be one of: {}",
+                    FETCH_PROVIDERS.join(", ")
+                ));
             }
             p
         }

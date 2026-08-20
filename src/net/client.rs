@@ -1,11 +1,13 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
-use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use reqwest::redirect::Policy;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::LazyLock;
+use std::time::Duration;
 
-use crate::config::{MAX_HTML_RESPONSE_BYTES, MAX_JSON_RESPONSE_BYTES, NETWORK_TIMEOUT, USER_AGENT as APP_USER_AGENT};
+use crate::config::{
+    MAX_HTML_RESPONSE_BYTES, MAX_JSON_RESPONSE_BYTES, NETWORK_TIMEOUT, USER_AGENT as APP_USER_AGENT,
+};
 use crate::net::ssrf::{validate_url, validate_url_async};
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -52,7 +54,11 @@ async fn read_response_bytes_with_limit(
         .unwrap_or(4096);
     let mut buffer = Vec::with_capacity(initial_cap);
 
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("Read failed: {}", e))? {
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("Read failed: {}", e))?
+    {
         if buffer.len().saturating_add(chunk.len()) > max_bytes {
             return Err(error_msg.to_string());
         }
@@ -113,7 +119,8 @@ pub async fn get_json(
 
     let bytes = read_response_bytes_with_limit(resp, max_b, "JSON response is too large").await?;
 
-    let val: Value = serde_json::from_slice(&bytes).map_err(|_| "JSON response must be an object".to_string())?;
+    let val: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| "JSON response must be an object".to_string())?;
     if !val.is_object() {
         return Err("JSON response must be an object".to_string());
     }
@@ -174,7 +181,8 @@ pub async fn post_json(
 
     let bytes = read_response_bytes_with_limit(resp, max_b, "JSON response is too large").await?;
 
-    let val: Value = serde_json::from_slice(&bytes).map_err(|_| "JSON response must be an object".to_string())?;
+    let val: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| "JSON response must be an object".to_string())?;
     if !val.is_object() {
         return Err("JSON response must be an object".to_string());
     }
@@ -204,7 +212,10 @@ pub async fn fetch_html(
     }
 
     let mut header_map = HeaderMap::new();
-    header_map.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,*/*"));
+    header_map.insert(
+        ACCEPT,
+        HeaderValue::from_static("text/html,application/xhtml+xml,*/*"),
+    );
     req = req.headers(header_map);
 
     let resp = req.send().await.map_err(|e| {
@@ -215,8 +226,7 @@ pub async fn fetch_html(
         }
     })?;
 
-    let final_url = validate_url(resp.url().as_str(), true)
-        .unwrap_or_else(|_| safe_url.clone());
+    let final_url = validate_url(resp.url().as_str(), true).unwrap_or_else(|_| safe_url.clone());
 
     let status = resp.status();
     if !status.is_success() {

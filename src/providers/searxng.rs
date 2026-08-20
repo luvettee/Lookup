@@ -1,8 +1,8 @@
+use regex::Regex;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use regex::Regex;
-use serde_json::{json, Value};
 use url::form_urlencoded;
 use url::Url;
 
@@ -80,11 +80,20 @@ fn parse_searx_directory(payload: &Value) -> Result<Vec<SearxDirectoryEntry>, St
         let tls = detail.get("tls").and_then(|v| v.as_object());
         let network = detail.get("network").and_then(|v| v.as_object());
         let timing = detail.get("timing").and_then(|v| v.as_object());
-        let search = timing.and_then(|t| t.get("search")).and_then(|v| v.as_object());
+        let search = timing
+            .and_then(|t| t.get("search"))
+            .and_then(|v| v.as_object());
         let uptime = detail.get("uptime").and_then(|v| v.as_object());
 
-        let http_ok = http.map(|h| h.get("status_code").and_then(|v| v.as_i64()) == Some(200) && h.get("error").is_none()).unwrap_or(false);
-        let tls_ok = tls.map(|t| t.get("error").is_none() && t.get("version").is_some()).unwrap_or(false);
+        let http_ok = http
+            .map(|h| {
+                h.get("status_code").and_then(|v| v.as_i64()) == Some(200)
+                    && h.get("error").is_none()
+            })
+            .unwrap_or(false);
+        let tls_ok = tls
+            .map(|t| t.get("error").is_none() && t.get("version").is_some())
+            .unwrap_or(false);
         let network_ok = network.map(|n| n.get("error").is_none()).unwrap_or(false);
         let search_ok = search.map(|s| s.get("error").is_none()).unwrap_or(false);
         let version_ok = detail.get("version").is_some();
@@ -98,7 +107,9 @@ fn parse_searx_directory(payload: &Value) -> Result<Vec<SearxDirectoryEntry>, St
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
-        let timings_all = search.and_then(|s| s.get("all")).and_then(|v| v.as_object());
+        let timings_all = search
+            .and_then(|s| s.get("all"))
+            .and_then(|v| v.as_object());
         let latency = timings_all
             .and_then(|t| {
                 t.get("median")
@@ -117,7 +128,11 @@ fn parse_searx_directory(payload: &Value) -> Result<Vec<SearxDirectoryEntry>, St
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
-        if success < 90.0 || !(0.0..=3.0).contains(&latency) || week_uptime < 90.0 || month_uptime < 90.0 {
+        if success < 90.0
+            || !(0.0..=3.0).contains(&latency)
+            || week_uptime < 90.0
+            || month_uptime < 90.0
+        {
             continue;
         }
 
@@ -133,8 +148,16 @@ fn parse_searx_directory(payload: &Value) -> Result<Vec<SearxDirectoryEntry>, St
         b.success
             .partial_cmp(&a.success)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.latency.partial_cmp(&b.latency).unwrap_or(std::cmp::Ordering::Equal))
-            .then_with(|| b.uptime.partial_cmp(&a.uptime).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                a.latency
+                    .partial_cmp(&b.latency)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| {
+                b.uptime
+                    .partial_cmp(&a.uptime)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| a.url.cmp(&b.url))
     });
 
@@ -150,7 +173,9 @@ fn get_cached_directory(allow_stale: bool) -> Vec<SearxDirectoryEntry> {
     let now = Instant::now();
     let lock = SEARX_DIRECTORY.lock().unwrap();
     if !lock.instances.is_empty() {
-        if now < lock.expires_at || (allow_stale && now.duration_since(lock.updated_at) < SEARX_DIRECTORY_STALE_TTL) {
+        if now < lock.expires_at
+            || (allow_stale && now.duration_since(lock.updated_at) < SEARX_DIRECTORY_STALE_TTL)
+        {
             return lock.instances.clone();
         }
     }
@@ -178,7 +203,11 @@ async fn discover_searxng_instances() -> Vec<SearxDirectoryEntry> {
     let health_name = "directory:searx.space";
     if !health_available(health_name) {
         let stale = get_cached_directory(true);
-        return if !stale.is_empty() { stale } else { emergency_instances() };
+        return if !stale.is_empty() {
+            stale
+        } else {
+            emergency_instances()
+        };
     }
 
     let fetch_result = attempt_provider(health_name, || async {
@@ -242,7 +271,9 @@ async fn public_searxng_candidates() -> Vec<String> {
     for u in urls {
         let clean = u.trim_end_matches('/');
         if let Ok(safe_url) = validate_url(clean, false) {
-            if safe_url.starts_with("https://") && health_available(&format!("searxng:{}", safe_url)) {
+            if safe_url.starts_with("https://")
+                && health_available(&format!("searxng:{}", safe_url))
+            {
                 safe_urls.push(safe_url);
             }
         }
@@ -286,9 +317,17 @@ async fn public_searxng_candidates() -> Vec<String> {
             .then_with(|| healthy_b.cmp(&healthy_a))
             .then_with(|| valid_b.cmp(&valid_a))
             .then_with(|| def_b.cmp(&def_a))
-            .then_with(|| lat_a.partial_cmp(&lat_b).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                lat_a
+                    .partial_cmp(&lat_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| fail_a.cmp(&fail_b))
-            .then_with(|| succ_b.partial_cmp(&succ_a).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                succ_b
+                    .partial_cmp(&succ_a)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| a.cmp(b))
     });
 
@@ -357,7 +396,9 @@ async fn search_searxng_waves(
     stop_after_empty: bool,
 ) -> Result<Value, String> {
     let started = Instant::now();
-    let limit = candidates.len().min(SEARX_RACE_SIZE * MAX_SEARX_VALIDATION_WAVES);
+    let limit = candidates
+        .len()
+        .min(SEARX_RACE_SIZE * MAX_SEARX_VALIDATION_WAVES);
     let mut saw_empty = false;
 
     for offset in (0..limit).step_by(SEARX_RACE_SIZE) {
@@ -413,7 +454,8 @@ pub fn searxng_query_rewrite(query: &str) -> String {
     if let Some(cap) = QUALIFIER_RE.captures(query) {
         let subject = cap[1].trim();
         let qualifier = cap[2].trim();
-        if !subject.is_empty() && !qualifier.is_empty() && qualifier.split_whitespace().count() <= 6 {
+        if !subject.is_empty() && !qualifier.is_empty() && qualifier.split_whitespace().count() <= 6
+        {
             return format!("{} {}", qualifier, subject);
         }
     }
@@ -455,11 +497,31 @@ pub fn rank_searxng_results(query: &str, mut results: Vec<Value>) -> Vec<Value> 
 }
 
 fn score_searxng_item(item: &Value, terms: &[String], travel_intent: bool) -> usize {
-    let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-    let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-    let snippet = item.get("snippet").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-    let desc = item.get("description").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-    let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+    let title = item
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let content = item
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let snippet = item
+        .get("snippet")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let desc = item
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let url = item
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
 
     let rest = format!("{} {} {} {}", content, snippet, desc, url);
 
@@ -475,7 +537,13 @@ fn score_searxng_item(item: &Value, terms: &[String], travel_intent: bool) -> us
 
     if travel_intent {
         for term in &[
-            "attraction", "tourism", "travel", "visit", "activity", "activities", "holiday",
+            "attraction",
+            "tourism",
+            "travel",
+            "visit",
+            "activity",
+            "activities",
+            "holiday",
             "destination",
         ] {
             if title.contains(term) || rest.contains(term) {
@@ -508,7 +576,8 @@ pub async fn searxng_search(params: &HashMap<String, String>) -> Result<Value, S
     }
 
     if !safe_configured.is_empty() {
-        if let Ok(res) = race_searxng(&safe_configured, &encoded, SEARX_SEARCH_TIMEOUT, true).await {
+        if let Ok(res) = race_searxng(&safe_configured, &encoded, SEARX_SEARCH_TIMEOUT, true).await
+        {
             return Ok(res);
         }
     }
@@ -528,7 +597,9 @@ pub async fn searxng_search(params: &HashMap<String, String>) -> Result<Value, S
         .collect();
 
     if let Some(pref) = preferred.first() {
-        if let Ok(res) = race_searxng(&[pref.clone()], &encoded, SEARX_PREFERRED_TIMEOUT, false).await {
+        if let Ok(res) =
+            race_searxng(&[pref.clone()], &encoded, SEARX_PREFERRED_TIMEOUT, false).await
+        {
             return Ok(res);
         }
     }
@@ -541,16 +612,28 @@ pub async fn searxng_search(params: &HashMap<String, String>) -> Result<Value, S
         .collect();
 
     if public.is_empty() {
-        return Err("No healthy public SearXNG instance is currently available. Do not retry immediately.".to_string());
+        return Err(
+            "No healthy public SearXNG instance is currently available. Do not retry immediately."
+                .to_string(),
+        );
     }
 
     let has_time_range = params.contains_key("time_range");
-    let result = search_searxng_waves(&public, &encoded, SEARX_PUBLIC_VALIDATION_BUDGET, has_time_range).await;
+    let result = search_searxng_waves(
+        &public,
+        &encoded,
+        SEARX_PUBLIC_VALIDATION_BUDGET,
+        has_time_range,
+    )
+    .await;
 
     let res_val = match result {
         Ok(v) => v,
         Err(_) => {
-            return Err("No working public SearXNG instance was found. Do not retry immediately.".to_string());
+            return Err(
+                "No working public SearXNG instance was found. Do not retry immediately."
+                    .to_string(),
+            );
         }
     };
 
@@ -576,7 +659,14 @@ pub async fn searxng_search(params: &HashMap<String, String>) -> Result<Value, S
     };
     let relaxed_public = public_searxng_candidates().await;
 
-    if let Ok(mut relaxed) = search_searxng_waves(&relaxed_public, &relaxed_encoded, SEARX_PUBLIC_VALIDATION_BUDGET, false).await {
+    if let Ok(mut relaxed) = search_searxng_waves(
+        &relaxed_public,
+        &relaxed_encoded,
+        SEARX_PUBLIC_VALIDATION_BUDGET,
+        false,
+    )
+    .await
+    {
         if let Some(arr) = relaxed.get("results").and_then(|v| v.as_array()) {
             if !arr.is_empty() {
                 if let Value::Object(ref mut map) = relaxed {

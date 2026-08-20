@@ -64,9 +64,7 @@ pub fn failure_kind(err_msg: &str) -> (&'static str, Duration) {
         || msg.contains("forbidden")
     {
         ("authentication", AUTH_FAILURE_COOLDOWN)
-    } else if msg.contains("429")
-        || msg.contains("rate limit")
-        || msg.contains("too many requests")
+    } else if msg.contains("429") || msg.contains("rate limit") || msg.contains("too many requests")
     {
         ("rate_limit", RATE_LIMIT_COOLDOWN)
     } else if msg.contains("timeout") || msg.contains("timed out") {

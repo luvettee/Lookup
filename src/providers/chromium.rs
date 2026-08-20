@@ -47,9 +47,12 @@ pub fn parse_search_results(html: &str, count: usize) -> Result<Vec<Value>, Stri
     }
 
     let document = Html::parse_document(html);
-    let result_selector = Selector::parse(".result").map_err(|_| "Invalid search selector".to_string())?;
-    let title_selector = Selector::parse("a.result__a").map_err(|_| "Invalid search selector".to_string())?;
-    let snippet_selector = Selector::parse(".result__snippet").map_err(|_| "Invalid search selector".to_string())?;
+    let result_selector =
+        Selector::parse(".result").map_err(|_| "Invalid search selector".to_string())?;
+    let title_selector =
+        Selector::parse("a.result__a").map_err(|_| "Invalid search selector".to_string())?;
+    let snippet_selector =
+        Selector::parse(".result__snippet").map_err(|_| "Invalid search selector".to_string())?;
     let mut seen = HashSet::new();
     let mut results = Vec::new();
 

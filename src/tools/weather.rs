@@ -1,6 +1,6 @@
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
-use serde_json::{json, Value};
 use url::form_urlencoded;
 
 use crate::cache::{cache_get, cache_put};
@@ -8,7 +8,11 @@ use crate::config::weather_code_description;
 use crate::net::get_json;
 
 pub async fn geocode(location: &str) -> Result<Value, String> {
-    let clean_loc = location.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let clean_loc = location
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
     let cache_key = format!("geocode:{}", clean_loc);
     if let Some(cached) = cache_get(&cache_key) {
         return Ok(cached);
@@ -64,15 +68,25 @@ pub async fn weather(args: &HashMap<String, Value>) -> Result<Value, String> {
         _ => return Err("days must be an integer from 1 to 7".to_string()),
     };
 
-    let clean_loc = location.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let clean_loc = location
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
     let cache_key = format!("weather:{}:{}", clean_loc, days);
     if let Some(cached) = cache_get(&cache_key) {
         return Ok(cached);
     }
 
     let place = geocode(location).await?;
-    let lat = place.get("latitude").and_then(|v| v.as_f64()).ok_or("Missing latitude")?;
-    let lon = place.get("longitude").and_then(|v| v.as_f64()).ok_or("Missing longitude")?;
+    let lat = place
+        .get("latitude")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing latitude")?;
+    let lon = place
+        .get("longitude")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing longitude")?;
 
     let place_name = place.get("name").and_then(|v| v.as_str());
     let admin1 = place.get("admin1").and_then(|v| v.as_str());
@@ -93,16 +107,42 @@ pub async fn weather(args: &HashMap<String, Value>) -> Result<Value, String> {
     let data = get_json(&url, None, None, None).await?;
     let current = data.get("current").ok_or("Missing current weather")?;
     let daily = data.get("daily").ok_or("Missing daily forecast")?;
-    let tz = data.get("timezone").and_then(|v| v.as_str()).unwrap_or("UTC");
+    let tz = data
+        .get("timezone")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UTC");
 
-    let current_weather_code = current.get("weather_code").and_then(|v| v.as_i64()).unwrap_or(-1);
+    let current_weather_code = current
+        .get("weather_code")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
     let current_condition = weather_code_description(current_weather_code);
 
-    let daily_times = daily.get("time").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let daily_codes = daily.get("weather_code").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let daily_max = daily.get("temperature_2m_max").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let daily_min = daily.get("temperature_2m_min").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let daily_rain = daily.get("precipitation_probability_max").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let daily_times = daily
+        .get("time")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let daily_codes = daily
+        .get("weather_code")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let daily_max = daily
+        .get("temperature_2m_max")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let daily_min = daily
+        .get("temperature_2m_min")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let daily_rain = daily
+        .get("precipitation_probability_max")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     let mut forecast = Vec::new();
     for i in 0..days {

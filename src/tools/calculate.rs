@@ -1,6 +1,6 @@
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::f64::consts::{E, PI};
-use serde_json::{json, Value};
 
 const MAX_EXPRESSION_CHARS: usize = 4096;
 const MAX_AST_NODES: usize = 512;
@@ -35,7 +35,8 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        if c.is_ascii_digit() || (c == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit()) {
+        if c.is_ascii_digit() || (c == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit())
+        {
             let start = i;
             let mut has_dot = false;
             let mut has_exp = false;
@@ -334,7 +335,8 @@ fn eval_node(node: &AstNode) -> Result<f64, String> {
                     }
                     if l < 0.0 && r.fract() != 0.0 {
                         return Err(
-                            "Result is a complex number; only real numbers are supported".to_string(),
+                            "Result is a complex number; only real numbers are supported"
+                                .to_string(),
                         );
                     }
                     let res = l.powf(r);

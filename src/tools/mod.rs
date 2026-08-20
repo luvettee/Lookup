@@ -1,20 +1,24 @@
+pub mod browser_control;
 pub mod calculate;
 pub mod convert_units;
 pub mod news_search;
 pub mod page_links;
 pub mod read_url;
 pub mod research;
-pub mod search_and_fetch;
 pub mod screenshot_url;
+pub mod search_and_fetch;
 pub mod time;
 pub mod torrent;
 pub mod weather;
 pub mod web_search;
 
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 pub async fn dispatch_tool(name: &str, args: &HashMap<String, Value>) -> Result<Value, String> {
+    if name.starts_with("browser_") {
+        return browser_control::dispatch(name, args).await;
+    }
     match name {
         "web_search" => web_search::web_search(args).await,
         "search_and_fetch" => search_and_fetch::search_and_fetch(args).await,

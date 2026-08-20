@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 struct UnitCategory {
     name: &'static str,
@@ -192,10 +192,7 @@ const CATEGORIES: &[UnitCategory] = &[
 ];
 
 fn resolve_unit(alias: &str) -> Result<(&'static str, f64, f64), String> {
-    let key = alias
-        .to_lowercase()
-        .replace('°', "")
-        .replace(' ', "");
+    let key = alias.to_lowercase().replace('°', "").replace(' ', "");
 
     let mut matches = Vec::new();
 
@@ -221,11 +218,7 @@ fn resolve_unit(alias: &str) -> Result<(&'static str, f64, f64), String> {
     }
 }
 
-pub fn convert_units_calc(
-    value: f64,
-    from_unit: &str,
-    to_unit: &str,
-) -> Result<Value, String> {
+pub fn convert_units_calc(value: f64, from_unit: &str, to_unit: &str) -> Result<Value, String> {
     if !value.is_finite() {
         return Err("value must be a finite number".to_string());
     }

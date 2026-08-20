@@ -53,5 +53,7 @@ fn test_incompatible_units_error() {
     assert!(convert_units_calc(10.0, "km", "kg").is_err());
     assert!(convert_units_calc(10.0, "celsius", "meter").is_err());
     assert!(convert_units_calc(10.0, "invalid_unit", "meter").is_err());
-    assert!(convert_units_calc(10.0, "m", "km").unwrap_err().contains("Ambiguous unit"));
+    assert!(convert_units_calc(10.0, "m", "km")
+        .unwrap_err()
+        .contains("Ambiguous unit"));
 }

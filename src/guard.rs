@@ -1,7 +1,7 @@
+use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
-use regex::Regex;
 
 use crate::config::{
     MAX_ACTIVITY_SCOPES, MAX_SIMILAR_WEB_ACTIVITY, MAX_WEB_ACTIVITY, SEARCH_FAILURE_COOLDOWN,
@@ -122,7 +122,8 @@ impl SearchGuard {
     }
 }
 
-static SEARCH_GUARD: LazyLock<Mutex<SearchGuard>> = LazyLock::new(|| Mutex::new(SearchGuard::new()));
+static SEARCH_GUARD: LazyLock<Mutex<SearchGuard>> =
+    LazyLock::new(|| Mutex::new(SearchGuard::new()));
 
 pub fn check_search_guard(scope: &str, tool: &str, query: &str) -> Result<(), String> {
     let mut lock = SEARCH_GUARD.lock().unwrap();

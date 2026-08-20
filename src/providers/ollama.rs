@@ -1,6 +1,6 @@
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
-use serde_json::{json, Value};
 
 use crate::config::ollama_api_key;
 use crate::net::post_json;

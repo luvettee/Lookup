@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use std::env;
-use std::str::FromStr;
 use chrono::{Local, Utc};
 use chrono_tz::Tz;
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::env;
+use std::str::FromStr;
 
 pub fn current_time(args: &HashMap<String, Value>) -> Result<Value, String> {
     let zone_arg = args

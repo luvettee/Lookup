@@ -5,8 +5,8 @@ pub mod ollama;
 pub mod searxng;
 pub mod tavily;
 
-use std::collections::HashMap;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use tracing::debug;
 
 use crate::browser::render_html;
@@ -15,12 +15,7 @@ use crate::health::{attempt_provider, health_available};
 use crate::html::{parse_html, resolve_links, truncate_text, ExtractedLink, ParsedPage};
 use crate::net::{fetch_html, validate_url};
 
-pub fn normalize_results(
-    provider: &str,
-    query: &str,
-    payload: Value,
-    count: usize,
-) -> Value {
+pub fn normalize_results(provider: &str, query: &str, payload: Value, count: usize) -> Value {
     let metadata = payload.as_object().cloned().unwrap_or_default();
     let raw_arr = payload
         .get("results")
@@ -130,7 +125,10 @@ pub fn extract_fetch(payload: &Value, url: &str, max_chars: usize) -> ParsedPage
     let mut final_url = url.to_string();
 
     if let Some(obj) = payload.as_object() {
-        let results = obj.get("results").or_else(|| obj.get("data")).and_then(|v| v.as_array());
+        let results = obj
+            .get("results")
+            .or_else(|| obj.get("data"))
+            .and_then(|v| v.as_array());
         let matched = results.and_then(|arr| {
             arr.iter()
                 .find(|item| item.get("url").and_then(|v| v.as_str()).is_some())
@@ -154,7 +152,11 @@ pub fn extract_fetch(payload: &Value, url: &str, max_chars: usize) -> ParsedPage
             {
                 content = c.to_string();
             }
-            if let Some(links_arr) = m.get("links").or_else(|| m.get("anchors")).and_then(|v| v.as_array()) {
+            if let Some(links_arr) = m
+                .get("links")
+                .or_else(|| m.get("anchors"))
+                .and_then(|v| v.as_array())
+            {
                 for l in links_arr {
                     if let Some(s) = l.as_str() {
                         raw_links.push(ExtractedLink {
@@ -168,7 +170,11 @@ pub fn extract_fetch(payload: &Value, url: &str, max_chars: usize) -> ParsedPage
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let l_text = lo.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let l_text = lo
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         raw_links.push(ExtractedLink {
                             text: l_text,
                             url: l_url,
@@ -231,7 +237,11 @@ pub async fn chromium_fetch(url: &str, max_chars: usize) -> Result<ParsedPage, S
     Ok(parsed)
 }
 
-pub async fn fetch_provider(provider: &str, url: &str, max_chars: usize) -> Result<ParsedPage, String> {
+pub async fn fetch_provider(
+    provider: &str,
+    url: &str,
+    max_chars: usize,
+) -> Result<ParsedPage, String> {
     let safe_url = validate_url(url, true)?;
 
     if provider == "auto" {
@@ -381,7 +391,10 @@ async fn attempt_single(
         if !health_available(&health_name) {
             return Err(format!("{} search is temporarily cooling down", name));
         }
-        attempt_provider(&health_name, || execute_single_provider(name, query, count, domain, recency, news)).await?
+        attempt_provider(&health_name, || {
+            execute_single_provider(name, query, count, domain, recency, news)
+        })
+        .await?
     } else {
         execute_single_provider(name, query, count, domain, recency, news).await?
     };

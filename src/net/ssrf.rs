@@ -228,7 +228,8 @@ pub fn validate_url_syntax(raw: &str) -> Result<String, String> {
         return Err("url is too long".to_string());
     }
 
-    let parsed = Url::parse(url_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
+    let parsed =
+        Url::parse(url_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
 
     let scheme = parsed.scheme().to_lowercase();
     if scheme != "http" && scheme != "https" {
@@ -267,15 +268,22 @@ pub async fn validate_url_async(raw: &str, resolve_dns: bool) -> Result<String, 
         return Ok(parsed_str);
     }
 
-    let parsed = Url::parse(&parsed_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
-    let host = parsed.host_str().unwrap_or("").trim_end_matches('.').to_lowercase();
+    let parsed =
+        Url::parse(&parsed_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
+    let host = parsed
+        .host_str()
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_lowercase();
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         if !is_global_ip(&ip) {
             return Err("private or local URLs are not allowed".to_string());
         }
     } else {
-        let port = parsed.port_or_known_default().unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
+        let port = parsed
+            .port_or_known_default()
+            .unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
         let ips = resolve_host_async(&host, port).await?;
         for ip in &ips {
             if !is_global_ip(ip) {
@@ -293,15 +301,22 @@ pub fn validate_url(raw: &str, resolve_dns: bool) -> Result<String, String> {
         return Ok(parsed_str);
     }
 
-    let parsed = Url::parse(&parsed_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
-    let host = parsed.host_str().unwrap_or("").trim_end_matches('.').to_lowercase();
+    let parsed =
+        Url::parse(&parsed_str).map_err(|_| "url must be a valid http or https URL".to_string())?;
+    let host = parsed
+        .host_str()
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_lowercase();
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         if !is_global_ip(&ip) {
             return Err("private or local URLs are not allowed".to_string());
         }
     } else {
-        let port = parsed.port_or_known_default().unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
+        let port = parsed
+            .port_or_known_default()
+            .unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
         let ips = resolve_host(&host, port)?;
         for ip in &ips {
             if !is_global_ip(ip) {
@@ -322,7 +337,10 @@ pub fn normalize_url_key(url_str: &str) -> String {
             None => "".to_string(),
         };
         let path = parsed.path();
-        let query = parsed.query().map(|q| format!("?{}", q)).unwrap_or_default();
+        let query = parsed
+            .query()
+            .map(|q| format!("?{}", q))
+            .unwrap_or_default();
         format!("{}://{}{}{}{}", scheme, host, port_str, path, query)
     } else {
         url_str.to_lowercase()

@@ -4,12 +4,8 @@ use crate::config::{FETCH_PROVIDERS, MAX_QUERY_CHARS, MAX_URL_CHARS, SEARCH_PROV
 
 pub const JSONRPC_VERSION: &str = "2.0";
 pub const LATEST_STABLE_PROTOCOL_VERSION: &str = "2025-11-25";
-pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
-    "2025-11-25",
-    "2025-06-18",
-    "2025-03-26",
-    "2024-11-05",
-];
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
+    &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 pub const RPC_PARSE_ERROR: i32 = -32700;
 pub const RPC_INVALID_REQUEST: i32 = -32600;
@@ -26,6 +22,16 @@ fn read_only_annotations(title: &str, open_world: bool) -> Value {
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": open_world
+    })
+}
+
+fn browser_annotations(title: &str, read_only: bool, destructive: bool, idempotent: bool) -> Value {
+    json!({
+        "title": title,
+        "readOnlyHint": read_only,
+        "destructiveHint": destructive,
+        "idempotentHint": idempotent,
+        "openWorldHint": true
     })
 }
 
@@ -489,12 +495,337 @@ pub fn get_tools_list() -> Value {
             "execution": { "taskSupport": "forbidden" },
             "annotations": read_only_annotations("Torrent Search", true),
             "_meta": tool_meta("torrent", "medium")
+        },
+        {
+            "name": "browser_open",
+            "title": "Open Browser Page",
+            "description": "Open a URL in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": MAX_URL_CHARS,
+                        "format": "uri",
+                        "description": "Absolute URL to open."
+                    }
+                },
+                "required": ["url"]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Open Browser Page", false, false, false),
+            "_meta": tool_meta("browser", "medium")
+        },
+        {
+            "name": "browser_tabs",
+            "title": "List Browser Tabs",
+            "description": "List pages in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {}
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("List Browser Tabs", true, false, true),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_navigate",
+            "title": "Navigate Browser Page",
+            "description": "Navigate a page in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to navigate." },
+                    "url": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": MAX_URL_CHARS,
+                        "format": "uri",
+                        "description": "Absolute destination URL."
+                    }
+                },
+                "required": ["page_id", "url"]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Navigate Browser Page", false, false, false),
+            "_meta": tool_meta("browser", "medium")
+        },
+        {
+            "name": "browser_snapshot",
+            "title": "Snapshot Browser Page",
+            "description": "Inspect a page in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to inspect; defaults to the active page." },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["compact", "interactive", "full"],
+                        "default": "interactive",
+                        "description": "Snapshot detail level."
+                    },
+                    "max_elements": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "default": 200,
+                        "description": "Maximum elements to return."
+                    }
+                }
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Snapshot Browser Page", true, false, true),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_click",
+            "title": "Click Browser Page",
+            "description": "Click an element or coordinates in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to use; defaults to the active page." },
+                    "element_id": { "type": "integer", "minimum": 1, "description": "Element identifier from a snapshot." },
+                    "selector": { "type": "string", "minLength": 1, "description": "CSS selector to click." },
+                    "x": { "type": "number", "minimum": 0, "description": "Viewport x coordinate." },
+                    "y": { "type": "number", "minimum": 0, "description": "Viewport y coordinate." }
+                },
+                "anyOf": [
+                    { "required": ["element_id"] },
+                    { "required": ["selector"] },
+                    { "required": ["x", "y"] }
+                ]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Click Browser Page", false, true, false),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_type",
+            "title": "Type in Browser Page",
+            "description": "Type into a field in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to use; defaults to the active page." },
+                    "element_id": { "type": "integer", "minimum": 1, "description": "Element identifier from a snapshot." },
+                    "selector": { "type": "string", "minLength": 1, "description": "CSS selector for the field." },
+                    "text": { "type": "string", "description": "Text to enter." },
+                    "clear": { "type": "boolean", "default": true, "description": "Clear the field before typing." }
+                },
+                "required": ["text"],
+                "anyOf": [
+                    { "required": ["element_id"] },
+                    { "required": ["selector"] }
+                ]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Type in Browser Page", false, true, false),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_press",
+            "title": "Press Browser Key",
+            "description": "Press a key in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to use; defaults to the active page." },
+                    "key": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Key or key combination to press." }
+                },
+                "required": ["key"]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Press Browser Key", false, true, false),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_scroll",
+            "title": "Scroll Browser Page",
+            "description": "Scroll a page or element in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to use; defaults to the active page." },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"],
+                        "description": "Scroll direction."
+                    },
+                    "amount": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 600, "description": "Distance to scroll in pixels." },
+                    "element_id": { "type": "integer", "minimum": 1, "description": "Optional element to scroll into view instead of the page." }
+                },
+                "anyOf": [
+                    { "required": ["direction"] },
+                    { "required": ["element_id"] }
+                ]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Scroll Browser Page", false, false, false),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_wait",
+            "title": "Wait for Browser Page",
+            "description": "Wait for a condition in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to observe; defaults to the active page." },
+                    "condition": {
+                        "type": "string",
+                        "enum": ["selector", "visible", "text", "url", "navigation", "network_idle"],
+                        "description": "Condition to wait for."
+                    },
+                    "value": { "type": "string", "description": "Selector, text, or URL value for conditions that need one." },
+                    "timeout_ms": { "type": "integer", "minimum": 0, "maximum": 30000, "default": 10000, "description": "Maximum wait in milliseconds." }
+                },
+                "required": ["condition"]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Wait for Browser Page", true, false, true),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_read",
+            "title": "Read Browser Page",
+            "description": "Read rendered text from the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to read; defaults to the active page." },
+                    "max_chars": { "type": "integer", "minimum": 100, "maximum": 100000, "default": 12000, "description": "Maximum characters to return." }
+                }
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Read Browser Page", true, false, true),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_screenshot",
+            "title": "Screenshot Browser Page",
+            "description": "Capture a page in the local browser and return an MCP image that can render in chat. Prefer read_url for ordinary text.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to capture; defaults to the active page." },
+                    "full_page": { "type": "boolean", "default": false, "description": "Capture the full document instead of the viewport." }
+                }
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Screenshot Browser Page", true, false, true),
+            "_meta": tool_meta("browser", "medium")
+        },
+        {
+            "name": "browser_back",
+            "title": "Browser Back",
+            "description": "Go back in a page's history in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page whose history should move back; defaults to the active page." }
+                }
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Browser Back", false, false, false),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_forward",
+            "title": "Browser Forward",
+            "description": "Go forward in a page's history in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page whose history should move forward; defaults to the active page." }
+                }
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Browser Forward", false, false, false),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_reload",
+            "title": "Reload Browser Page",
+            "description": "Reload a page in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to reload; defaults to the active page." }
+                }
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Reload Browser Page", false, false, false),
+            "_meta": tool_meta("browser", "medium")
+        },
+        {
+            "name": "browser_close",
+            "title": "Close Browser Page",
+            "description": "Close a page or the session in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page to close; omit to shut down the browser session." }
+                }
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Close Browser Page", false, true, false),
+            "_meta": tool_meta("browser", "low")
+        },
+        {
+            "name": "browser_evaluate",
+            "title": "Evaluate Browser Script",
+            "description": "Run JavaScript in the local, interactive browser. Prefer web_search or read_url for ordinary static information.",
+            "inputSchema": {
+                "$schema": JSON_SCHEMA_DRAFT,
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "page_id": { "type": "string", "minLength": 1, "description": "Page in which to run the script." },
+                    "script": { "type": "string", "minLength": 1, "maxLength": 16000, "description": "JavaScript source to evaluate. Results are size-limited." }
+                },
+                "required": ["script"]
+            },
+            "execution": { "taskSupport": "forbidden" },
+            "annotations": browser_annotations("Evaluate Browser Script", false, true, false),
+            "_meta": tool_meta("browser", "medium")
         }
     ])
 }
 
 pub fn get_server_instructions() -> &'static str {
-    "Lookup is a fast, read-only research and utility server. Choose the narrowest tool that solves the request. Use read_url for text from a known URL; screenshot_url when visual page layout matters; web_search for discovery; search_and_fetch for discovery plus a small amount of page content; research only when multiple independent sources materially improve the answer; news_search for recent developments; and page_links to navigate within a known site. Reuse prior results and URLs instead of repeating equivalent searches. Prefer one precise call over several speculative calls. Keep result counts and fetched text small unless the task actually needs breadth or depth. Use weather, current_time, calculate, and convert_units instead of web search for those utilities. Use torrent_search only when the user explicitly asks for torrents, magnet links, or swarm metadata."
+    "Lookup is a research, utility, and local interactive browser server. Choose the narrowest tool that solves the request. Use read_url for text from a known URL; screenshot_url when visual page layout matters; web_search for discovery; search_and_fetch for discovery plus a small amount of page content; research only when multiple independent sources materially improve the answer; news_search for recent developments; and page_links to navigate within a known site. Prefer web_search or read_url for ordinary static information, and use browser tools only when local interactive browsing is needed. Reuse prior results and URLs instead of repeating equivalent searches. Prefer one precise call over several speculative calls. Keep result counts and fetched text small unless the task actually needs breadth or depth. Use weather, current_time, calculate, and convert_units instead of web search for those utilities. Use torrent_search only when the user explicitly asks for torrents, magnet links, or swarm metadata."
 }
 
 pub fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
@@ -536,8 +867,8 @@ pub fn make_initialize_response_for_protocol(
                 },
                 "instructions": get_server_instructions(),
                 "_meta": {
-                    "lookup/readOnly": true,
-                    "lookup/toolCount": 12,
+                    "lookup/readOnly": false,
+                    "lookup/toolCount": 28,
                     "lookup/version": VERSION
                 }
             }
@@ -554,7 +885,7 @@ pub fn make_tools_list_response(id: Option<Value>) -> Option<Value> {
                 "tools": get_tools_list(),
                 "_meta": {
                     "lookup/version": VERSION,
-                    "lookup/readOnly": true
+                    "lookup/readOnly": false
                 }
             }
         })
@@ -610,7 +941,10 @@ pub fn make_tool_success_response(id: Option<Value>, result: Value) -> Option<Va
     })
 }
 
-pub fn make_tool_success_text_response(id: Option<Value>, text: impl Into<String>) -> Option<Value> {
+pub fn make_tool_success_text_response(
+    id: Option<Value>,
+    text: impl Into<String>,
+) -> Option<Value> {
     let text = text.into();
     id.map(|req_id| {
         make_result_response(
@@ -869,11 +1203,44 @@ mod tests {
     fn tool_list_contains_expected_tools() {
         let tools = get_tools_list();
         let tools = tools.as_array().expect("tools must be an array");
-        assert_eq!(tools.len(), 12);
-        assert!(tools.iter().any(|tool| tool["name"] == "web_search"));
-        assert!(tools.iter().any(|tool| tool["name"] == "screenshot_url"));
-        assert!(tools.iter().any(|tool| tool["name"] == "research"));
-        assert!(tools.iter().any(|tool| tool["name"] == "torrent_search"));
+        assert_eq!(tools.len(), 28);
+        let names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("tool name"))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "web_search",
+                "search_and_fetch",
+                "read_url",
+                "screenshot_url",
+                "research",
+                "news_search",
+                "page_links",
+                "weather",
+                "current_time",
+                "calculate",
+                "convert_units",
+                "torrent_search",
+                "browser_open",
+                "browser_tabs",
+                "browser_navigate",
+                "browser_snapshot",
+                "browser_click",
+                "browser_type",
+                "browser_press",
+                "browser_scroll",
+                "browser_wait",
+                "browser_read",
+                "browser_screenshot",
+                "browser_back",
+                "browser_forward",
+                "browser_reload",
+                "browser_close",
+                "browser_evaluate",
+            ]
+        );
     }
 
     #[test]
@@ -887,10 +1254,7 @@ mod tests {
 
     #[test]
     fn protocol_negotiation_prefers_supported_requested_version() {
-        assert_eq!(
-            negotiate_protocol_version(Some("2024-11-05")),
-            "2024-11-05"
-        );
+        assert_eq!(negotiate_protocol_version(Some("2024-11-05")), "2024-11-05");
         assert_eq!(
             negotiate_protocol_version(Some("not-a-real-version")),
             LATEST_STABLE_PROTOCOL_VERSION

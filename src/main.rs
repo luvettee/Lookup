@@ -10,10 +10,10 @@ pub mod protocol;
 pub mod providers;
 pub mod tools;
 
+use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 use std::io::Write;
-use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, Level};
@@ -48,14 +48,22 @@ async fn handle_request(request: Value, sender: mpsc::UnboundedSender<Value>) {
     };
 
     if req_obj.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
-        let _ = sender.send(make_rpc_error_response(req_obj.get("id").cloned(), -32600, "Invalid Request"));
+        let _ = sender.send(make_rpc_error_response(
+            req_obj.get("id").cloned(),
+            -32600,
+            "Invalid Request",
+        ));
         return;
     }
 
     let method = match req_obj.get("method").and_then(|v| v.as_str()) {
         Some(m) => m,
         None => {
-            let _ = sender.send(make_rpc_error_response(req_obj.get("id").cloned(), -32600, "Invalid Request"));
+            let _ = sender.send(make_rpc_error_response(
+                req_obj.get("id").cloned(),
+                -32600,
+                "Invalid Request",
+            ));
             return;
         }
     };
@@ -91,7 +99,8 @@ async fn handle_request(request: Value, sender: mpsc::UnboundedSender<Value>) {
                 Some(p) => p.clone(),
                 None => {
                     if has_id {
-                        let _ = sender.send(make_rpc_error_response(req_id, -32602, "Invalid params"));
+                        let _ =
+                            sender.send(make_rpc_error_response(req_id, -32602, "Invalid params"));
                     }
                     return;
                 }
@@ -101,26 +110,42 @@ async fn handle_request(request: Value, sender: mpsc::UnboundedSender<Value>) {
                 Some(n) => n.to_string(),
                 None => {
                     if has_id {
-                        let _ = sender.send(make_rpc_error_response(req_id, -32602, "Missing tool name"));
+                        let _ = sender.send(make_rpc_error_response(
+                            req_id,
+                            -32602,
+                            "Missing tool name",
+                        ));
                     }
                     return;
                 }
             };
 
-            let mut arguments: HashMap<String, Value> = match params.get("arguments").and_then(|v| v.as_object()) {
-                Some(args) => args.clone().into_iter().collect(),
-                None => {
-                    if has_id {
-                        let _ = sender.send(make_rpc_error_response(req_id, -32602, "Tool arguments must be an object"));
+            let mut arguments: HashMap<String, Value> =
+                match params.get("arguments").and_then(|v| v.as_object()) {
+                    Some(args) => args.clone().into_iter().collect(),
+                    None => {
+                        if has_id {
+                            let _ = sender.send(make_rpc_error_response(
+                                req_id,
+                                -32602,
+                                "Tool arguments must be an object",
+                            ));
+                        }
+                        return;
                     }
-                    return;
-                }
-            };
+                };
 
             arguments.remove("__activity_scope");
             if let Some(meta) = params.get("_meta").and_then(|v| v.as_object()) {
-                if let Some(scope) = meta.get("sessionId").or_else(|| meta.get("clientId")).and_then(|v| v.as_str()) {
-                    arguments.insert("__activity_scope".to_string(), Value::String(scope.to_string()));
+                if let Some(scope) = meta
+                    .get("sessionId")
+                    .or_else(|| meta.get("clientId"))
+                    .and_then(|v| v.as_str())
+                {
+                    arguments.insert(
+                        "__activity_scope".to_string(),
+                        Value::String(scope.to_string()),
+                    );
                 }
             }
 
@@ -208,5 +233,6 @@ async fn main() {
         }
     }
 
+    browser::manager::shutdown_global().await;
     info!("Lookup MCP server shutting down");
 }

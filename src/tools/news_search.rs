@@ -1,6 +1,6 @@
+use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
-use serde_json::Value;
 
 use crate::budget::enforce_output_budget;
 use crate::cache::{cache_get, cache_put};
@@ -21,7 +21,10 @@ pub async fn news_search(args: &HashMap<String, Value>) -> Result<Value, String>
     let provider = match args.get("provider").and_then(|v| v.as_str()) {
         Some(p) => {
             if !SEARCH_PROVIDERS.contains(&p) {
-                return Err(format!("provider must be one of: {}", SEARCH_PROVIDERS.join(", ")));
+                return Err(format!(
+                    "provider must be one of: {}",
+                    SEARCH_PROVIDERS.join(", ")
+                ));
             }
             p
         }
@@ -58,15 +61,7 @@ pub async fn news_search(args: &HashMap<String, Value>) -> Result<Value, String>
 
     check_search_guard(scope, "news_search", raw_query)?;
 
-    let search_res = do_search(
-        provider,
-        raw_query,
-        count,
-        None,
-        Some(&recency),
-        true,
-    )
-    .await?;
+    let search_res = do_search(provider, raw_query, count, None, Some(&recency), true).await?;
 
     let budgeted = enforce_output_budget(search_res, None);
     cache_put(&cache_key, Duration::from_secs(180), budgeted.clone());

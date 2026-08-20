@@ -1,10 +1,10 @@
+use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
-use serde_json::Value;
 
 use crate::budget::enforce_output_budget;
 use crate::cache::{cache_get, cache_put};
-use crate::config::{SEARCH_PROVIDERS, MAX_QUERY_CHARS};
+use crate::config::{MAX_QUERY_CHARS, SEARCH_PROVIDERS};
 use crate::guard::{check_search_guard, mark_search_guard_failure, normalize_query};
 use crate::providers::do_search;
 use crate::tools::torrent::{is_torrent_query, torrent_search};
@@ -29,7 +29,10 @@ pub async fn web_search(args: &HashMap<String, Value>) -> Result<Value, String> 
     let provider = match args.get("provider").and_then(|v| v.as_str()) {
         Some(p) => {
             if !SEARCH_PROVIDERS.contains(&p) {
-                return Err(format!("provider must be one of: {}", SEARCH_PROVIDERS.join(", ")));
+                return Err(format!(
+                    "provider must be one of: {}",
+                    SEARCH_PROVIDERS.join(", ")
+                ));
             }
             p
         }

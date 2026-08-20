@@ -29,13 +29,23 @@ fn test_html_parsing_and_metadata() {
         parsed.description,
         "A language empowering everyone to build reliable and efficient software."
     );
-    assert!(parsed.content.contains("Rust is fast and memory-efficient."));
-    assert!(parsed.content.contains("It has no runtime or garbage collector."));
+    assert!(parsed
+        .content
+        .contains("Rust is fast and memory-efficient."));
+    assert!(parsed
+        .content
+        .contains("It has no runtime or garbage collector."));
 
-    let doc_link = parsed.links.iter().find(|l| l.url.starts_with("https://doc.rust-lang.org"));
+    let doc_link = parsed
+        .links
+        .iter()
+        .find(|l| l.url.starts_with("https://doc.rust-lang.org"));
     assert!(doc_link.is_some());
 
-    let install_link = parsed.links.iter().find(|l| l.url == "https://www.rust-lang.org/install");
+    let install_link = parsed
+        .links
+        .iter()
+        .find(|l| l.url == "https://www.rust-lang.org/install");
     assert!(install_link.is_some());
 }
 
@@ -54,7 +64,8 @@ fn test_clean_blocks_filters_junk() {
 
 #[test]
 fn test_truncate_text_boundaries() {
-    let long_text = "First paragraph.\n\nSecond paragraph has some extra details.\n\nThird paragraph.";
+    let long_text =
+        "First paragraph.\n\nSecond paragraph has some extra details.\n\nThird paragraph.";
     let truncated = truncate_text(long_text, 40);
     assert!(truncated.ends_with("[content truncated]"));
     assert!(truncated.contains("First paragraph."));

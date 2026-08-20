@@ -155,7 +155,9 @@ pub fn enforce_output_budget(mut payload: Value, max_chars: Option<usize>) -> Va
         ("text", 40),
     ];
     for (key, minimum) in step1_fields {
-        while serialized_chars(&payload) > budget && shrink_field(&mut payload, key, minimum, budget) {}
+        while serialized_chars(&payload) > budget
+            && shrink_field(&mut payload, key, minimum, budget)
+        {}
     }
 
     // Step 2: Prune list items from results/sources/links
@@ -170,7 +172,9 @@ pub fn enforce_output_budget(mut payload: Value, max_chars: Option<usize>) -> Va
         ("query", 40),
     ];
     for (key, minimum) in step3_fields {
-        while serialized_chars(&payload) > budget && shrink_field(&mut payload, key, minimum, budget) {}
+        while serialized_chars(&payload) > budget
+            && shrink_field(&mut payload, key, minimum, budget)
+        {}
     }
 
     if serialized_chars(&payload) > budget {

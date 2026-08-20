@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
 use data_encoding::{BASE32, HEXLOWER};
 use regex::Regex;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 use url::form_urlencoded;
 use url::Url;
 
@@ -26,14 +26,16 @@ pub static TORRENT_INTENT_RE: LazyLock<Regex> = LazyLock::new(|| {
 static MAGNET_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)magnet:\?[^\s<>"']+"#).unwrap());
 
-static SIZE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(\d+(?:\.\d+)?)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)\b").unwrap());
+static SIZE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(\d+(?:\.\d+)?)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)\b").unwrap()
+});
 
 static SEED_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b(?:seeders?|seeds?)\s*[:=]?\s*(\d[\d,]*)").unwrap());
 
-static LEECH_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(?:leechers?|leeches|peers?)\s*[:=]?\s*(\d[\d,]*)").unwrap());
+static LEECH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:leechers?|leeches|peers?)\s*[:=]?\s*(\d[\d,]*)").unwrap()
+});
 
 pub fn is_torrent_query(query: &str) -> bool {
     TORRENT_INTENT_RE.is_match(query)
@@ -226,7 +228,8 @@ pub fn parse_torrent(data: &[u8]) -> Result<TorrentInfo, String> {
         index = val_end;
     }
 
-    let (start, end) = info_span.ok_or_else(|| "torrent metainfo has no valid info dictionary".to_string())?;
+    let (start, end) =
+        info_span.ok_or_else(|| "torrent metainfo has no valid info dictionary".to_string())?;
     let mut hasher = Sha1::new();
     hasher.update(&data[start..end]);
     let info_hash = HEXLOWER.encode(&hasher.finalize());
@@ -255,9 +258,9 @@ pub fn parse_torrent(data: &[u8]) -> Result<TorrentInfo, String> {
                                 if fk == b"length" {
                                     if let BencodeValue::Int(flen) = fv {
                                         if flen > 0 {
-                                            total = total
-                                                .checked_add(flen as u64)
-                                                .ok_or_else(|| "invalid torrent size".to_string())?;
+                                            total = total.checked_add(flen as u64).ok_or_else(
+                                                || "invalid torrent size".to_string(),
+                                            )?;
                                         }
                                     }
                                 }
@@ -297,7 +300,9 @@ pub fn is_trusted_torrent_source(url_str: &str) -> bool {
     if domain.is_empty() {
         return false;
     }
-    TRUSTED_TORRENT_DOMAINS.iter().any(|&d| domain == d || domain.ends_with(&format!(".{}", d)))
+    TRUSTED_TORRENT_DOMAINS
+        .iter()
+        .any(|&d| domain == d || domain.ends_with(&format!(".{}", d)))
 }
 
 fn number_match(re: &Regex, text: &str) -> Option<i64> {
@@ -400,14 +405,23 @@ pub fn candidate_from_link(
 pub fn torrent_links_in_text(text: &str) -> Vec<String> {
     let mut links = Vec::new();
     for cap in MAGNET_RE.find_iter(text) {
-        links.push(cap.as_str().trim_end_matches(['.', ',', ';', ')']).to_string());
+        links.push(
+            cap.as_str()
+                .trim_end_matches(['.', ',', ';', ')'])
+                .to_string(),
+        );
     }
 
-    static HTTP_TORRENT_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?i)https?://[^\s<>"']+?\.torrent(?:\?[^\s<>"']*)?"#).unwrap());
+    static HTTP_TORRENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)https?://[^\s<>"']+?\.torrent(?:\?[^\s<>"']*)?"#).unwrap()
+    });
 
     for cap in HTTP_TORRENT_RE.find_iter(text) {
-        links.push(cap.as_str().trim_end_matches(['.', ',', ';', ')']).to_string());
+        links.push(
+            cap.as_str()
+                .trim_end_matches(['.', ',', ';', ')'])
+                .to_string(),
+        );
     }
 
     links.dedup();
@@ -468,7 +482,10 @@ async fn torznab_search(query: &str, count: usize) -> Vec<Value> {
     for endpoint in endpoints {
         let sep = if endpoint.contains('?') { "&" } else { "?" };
         let encoded_q = form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
-        let url = format!("{}{}t=search&q={}&limit={}", endpoint, sep, encoded_q, count);
+        let url = format!(
+            "{}{}t=search&q={}&limit={}",
+            endpoint, sep, encoded_q, count
+        );
 
         let mut headers = HashMap::new();
         headers.insert("Accept".to_string(), "application/xml".to_string());
@@ -480,7 +497,8 @@ async fn torznab_search(query: &str, count: usize) -> Vec<Value> {
             let title_re = Regex::new(r"<title>(.*?)</title>").unwrap();
             let link_re = Regex::new(r"<link>(.*?)</link>").unwrap();
             let enclosure_re = Regex::new(r#"<enclosure\s+url="([^"]+)""#).unwrap();
-            let attr_re = Regex::new(r#"<torznab:attr\s+name="([^"]+)"\s+value="([^"]+)""#).unwrap();
+            let attr_re =
+                Regex::new(r#"<torznab:attr\s+name="([^"]+)"\s+value="([^"]+)""#).unwrap();
 
             for cap in item_re.captures_iter(&xml_str) {
                 let item_xml = &cap[1];
@@ -488,12 +506,8 @@ async fn torznab_search(query: &str, count: usize) -> Vec<Value> {
                     .captures(item_xml)
                     .map(|c| c[1].to_string())
                     .unwrap_or_default();
-                let enclosure = enclosure_re
-                    .captures(item_xml)
-                    .map(|c| c[1].to_string());
-                let link_elem = link_re
-                    .captures(item_xml)
-                    .map(|c| c[1].to_string());
+                let enclosure = enclosure_re.captures(item_xml).map(|c| c[1].to_string());
+                let link_elem = link_re.captures(item_xml).map(|c| c[1].to_string());
 
                 let mut attrs = HashMap::new();
                 for attr_cap in attr_re.captures_iter(item_xml) {
@@ -530,16 +544,25 @@ async fn torznab_search(query: &str, count: usize) -> Vec<Value> {
                     extra.insert("leechers".to_string(), json!(l));
                 }
 
-                if let Some(mut cand) = candidate_from_link(&link, &title, &endpoint, &title, Some(extra)) {
+                if let Some(mut cand) =
+                    candidate_from_link(&link, &title, &endpoint, &title, Some(extra))
+                {
                     if let Value::Object(ref mut map) = cand {
                         let s_domain = source_domain(&endpoint);
                         map.insert(
                             "source".to_string(),
-                            json!(if !s_domain.is_empty() { s_domain } else { "Torznab".to_string() }),
+                            json!(if !s_domain.is_empty() {
+                                s_domain
+                            } else {
+                                "Torznab".to_string()
+                            }),
                         );
                         map.insert(
                             "verified".to_string(),
-                            json!(attrs.get("downloadvolumefactor").map(|v| v == "0").unwrap_or(false)),
+                            json!(attrs
+                                .get("downloadvolumefactor")
+                                .map(|v| v == "0")
+                                .unwrap_or(false)),
                         );
                     }
                     results.push(cand);
@@ -557,7 +580,10 @@ async fn internet_archive_torrents(query: &str, count: usize) -> Vec<Value> {
         let mut params = form_urlencoded::Serializer::new(String::new());
         params.append_pair(
             "q",
-            &format!("({}) AND mediatype:(software OR texts OR audio OR movies)", query),
+            &format!(
+                "({}) AND mediatype:(software OR texts OR audio OR movies)",
+                query
+            ),
         );
         params.append_pair("fl[]", "identifier");
         params.append_pair("fl[]", "title");
@@ -579,22 +605,25 @@ async fn internet_archive_torrents(query: &str, count: usize) -> Vec<Value> {
         {
             for doc in docs {
                 if let Some(id) = doc.get("identifier").and_then(|v| v.as_str()) {
-                    let title = doc
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(id);
+                    let title = doc.get("title").and_then(|v| v.as_str()).unwrap_or(id);
                     let item_size = doc.get("item_size").and_then(|v| v.as_u64());
 
-                    let encoded_id = form_urlencoded::byte_serialize(id.as_bytes()).collect::<String>();
+                    let encoded_id =
+                        form_urlencoded::byte_serialize(id.as_bytes()).collect::<String>();
                     let item_url = format!("https://archive.org/details/{}", encoded_id);
-                    let torrent_url = format!("https://archive.org/download/{}/{}_archive.torrent", encoded_id, encoded_id);
+                    let torrent_url = format!(
+                        "https://archive.org/download/{}/{}_archive.torrent",
+                        encoded_id, encoded_id
+                    );
 
                     let mut extra = HashMap::new();
                     if let Some(sz) = item_size {
                         extra.insert("size_bytes".to_string(), json!(sz));
                     }
 
-                    if let Some(mut cand) = candidate_from_link(&torrent_url, title, &item_url, "", Some(extra)) {
+                    if let Some(mut cand) =
+                        candidate_from_link(&torrent_url, title, &item_url, "", Some(extra))
+                    {
                         if let Value::Object(ref mut map) = cand {
                             map.insert("trusted".to_string(), json!(true));
                             map.insert("verified".to_string(), json!(false));
@@ -642,7 +671,9 @@ async fn torrent_site_search(query: &str, count: usize) -> Vec<Value> {
                 if l_url.to_lowercase().starts_with("magnet:")
                     || l_url.split('?').next().unwrap_or("").ends_with(".torrent")
                 {
-                    if let Some(cand) = candidate_from_link(l_url, &link.text, &search_url, &page_text, None) {
+                    if let Some(cand) =
+                        candidate_from_link(l_url, &link.text, &search_url, &page_text, None)
+                    {
                         results.push(cand);
                     }
                 }
@@ -650,7 +681,9 @@ async fn torrent_site_search(query: &str, count: usize) -> Vec<Value> {
 
             for t_link in torrent_links_in_text(&page_text) {
                 if t_link.to_lowercase().starts_with("magnet:") {
-                    if let Some(cand) = candidate_from_link(&t_link, &parsed.title, &search_url, &page_text, None) {
+                    if let Some(cand) =
+                        candidate_from_link(&t_link, &parsed.title, &search_url, &page_text, None)
+                    {
                         results.push(cand);
                     }
                 }
@@ -675,7 +708,9 @@ async fn torrent_site_search(query: &str, count: usize) -> Vec<Value> {
                 if l_url.to_lowercase().starts_with("magnet:")
                     || l_url.split('?').next().unwrap_or("").ends_with(".torrent")
                 {
-                    if let Some(cand) = candidate_from_link(l_url, &link.text, &search_url, &page_text, None) {
+                    if let Some(cand) =
+                        candidate_from_link(l_url, &link.text, &search_url, &page_text, None)
+                    {
                         results.push(cand);
                     }
                 }
@@ -739,8 +774,16 @@ pub fn rank_torrents(mut results: Vec<Value>, query: &str) -> Vec<Value> {
 }
 
 fn score_torrent(res: &Value, terms: &[String]) -> (usize, i64, usize, usize, usize) {
-    let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-    let source = res.get("source").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+    let name = res
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let source = res
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
     let text = format!("{} {}", name, source);
 
     let relevance = terms.iter().filter(|&t| text.contains(t)).count();
@@ -755,12 +798,20 @@ fn score_torrent(res: &Value, terms: &[String]) -> (usize, i64, usize, usize, us
     } else {
         0
     };
-    let trusted = if res.get("trusted").and_then(|v| v.as_bool()).unwrap_or(false) {
+    let trusted = if res
+        .get("trusted")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         1
     } else {
         0
     };
-    let verified = if res.get("verified").and_then(|v| v.as_bool()).unwrap_or(false) {
+    let verified = if res
+        .get("verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         1
     } else {
         0
@@ -773,7 +824,10 @@ pub async fn validate_torrent_candidate(mut cand: Value) -> Value {
     let c_type = cand.get("type").and_then(|v| v.as_str()).unwrap_or("");
     if c_type == "magnet" {
         if let Value::Object(ref mut map) = cand {
-            map.insert("validation".to_string(), json!("valid_syntax_and_info_hash"));
+            map.insert(
+                "validation".to_string(),
+                json!("valid_syntax_and_info_hash"),
+            );
         }
         return cand;
     }
@@ -850,7 +904,8 @@ pub async fn torrent_search(args: &HashMap<String, Value>) -> Result<Value, Stri
     check_search_guard(scope, "torrent_search", query)?;
 
     static CLEAN_WORDS: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)\b(?:find|search|download|get|me|for|a|an|the|torrent|magnet|link)\b").unwrap()
+        Regex::new(r"(?i)\b(?:find|search|download|get|me|for|a|an|the|torrent|magnet|link)\b")
+            .unwrap()
     });
 
     let mut clean_query = CLEAN_WORDS.replace_all(query, " ").to_string();
@@ -889,7 +944,13 @@ pub async fn torrent_search(args: &HashMap<String, Value>) -> Result<Value, Stri
                     }
                 }
 
-                if item_url.split('?').next().unwrap_or("").to_lowercase().ends_with(".torrent") {
+                if item_url
+                    .split('?')
+                    .next()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .ends_with(".torrent")
+                {
                     if let Some(cand) = candidate_from_link(
                         item_url,
                         item.get("title").and_then(|v| v.as_str()).unwrap_or(""),
@@ -909,20 +970,30 @@ pub async fn torrent_search(args: &HashMap<String, Value>) -> Result<Value, Stri
                 if let Some(page_url) = item.get("url").and_then(|v| v.as_str()) {
                     if !page_url.to_lowercase().ends_with(".torrent") {
                         crawl_futs.push(async move {
-                            if let Ok(page_resp) = fetch_html(page_url, 12000, Some(NETWORK_TIMEOUT)).await {
-                                let parsed = crate::html::parse_html(&page_resp.raw_html, &page_resp.final_url, 12000);
-                                let p_text = format!("{} {} {}", parsed.title, parsed.description, parsed.content);
+                            if let Ok(page_resp) =
+                                fetch_html(page_url, 12000, Some(NETWORK_TIMEOUT)).await
+                            {
+                                let parsed = crate::html::parse_html(
+                                    &page_resp.raw_html,
+                                    &page_resp.final_url,
+                                    12000,
+                                );
+                                let p_text = format!(
+                                    "{} {} {}",
+                                    parsed.title, parsed.description, parsed.content
+                                );
                                 let mut page_cands = Vec::new();
                                 for link in &parsed.links {
                                     if link.url.to_lowercase().starts_with("magnet:")
-                                        || link.url.split('?').next().unwrap_or("").ends_with(".torrent")
+                                        || link
+                                            .url
+                                            .split('?')
+                                            .next()
+                                            .unwrap_or("")
+                                            .ends_with(".torrent")
                                     {
                                         if let Some(cand) = candidate_from_link(
-                                            &link.url,
-                                            &link.text,
-                                            page_url,
-                                            &p_text,
-                                            None,
+                                            &link.url, &link.text, page_url, &p_text, None,
                                         ) {
                                             page_cands.push(cand);
                                         }

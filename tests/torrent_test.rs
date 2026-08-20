@@ -1,11 +1,15 @@
-use lookup::tools::torrent::{is_torrent_query, parse_magnet, parse_torrent, torrent_links_in_text};
+use lookup::tools::torrent::{
+    is_torrent_query, parse_magnet, parse_torrent, torrent_links_in_text,
+};
 
 #[test]
 fn test_torrent_intent_detection() {
     assert!(is_torrent_query("download ubuntu torrent"));
     assert!(is_torrent_query("find debian magnet link"));
     assert!(is_torrent_query("get file.torrent"));
-    assert!(is_torrent_query("magnet:?xt=urn:btih:abcdef1234567890abcdef1234567890abcdef12"));
+    assert!(is_torrent_query(
+        "magnet:?xt=urn:btih:abcdef1234567890abcdef1234567890abcdef12"
+    ));
     assert!(!is_torrent_query("how to write rust code"));
     assert!(!is_torrent_query("weather in Vancouver"));
 }

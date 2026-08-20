@@ -1,10 +1,8 @@
-use std::collections::HashMap;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use url::form_urlencoded;
 
-use crate::config::{
-    brave_api_key, brave_freshness, BRAVE_NEWS_SEARCH_URL, BRAVE_WEB_SEARCH_URL,
-};
+use crate::config::{brave_api_key, brave_freshness, BRAVE_NEWS_SEARCH_URL, BRAVE_WEB_SEARCH_URL};
 use crate::net::get_json;
 
 pub fn require_brave_api_key() -> Result<String, String> {
@@ -30,7 +28,10 @@ pub fn parse_brave_items(payload: &Value, news: bool) -> Vec<Value> {
     for raw_item in arr {
         let title = raw_item.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let url = raw_item.get("url").and_then(|v| v.as_str()).unwrap_or("");
-        let description = raw_item.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        let description = raw_item
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         let published = raw_item
             .get("page_age")

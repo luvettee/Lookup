@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use url::Url;
 
 use crate::config::{exa_api_key, recency_to_days, EXA_SEARCH_URL};
@@ -25,22 +25,19 @@ pub fn parse_exa_items(payload: &Value) -> Vec<Value> {
         let text = raw_item.get("text").and_then(|v| v.as_str());
         let highlights = raw_item.get("highlights").and_then(|v| v.as_array());
 
-        let snippet = summary
-            .or(text)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                if let Some(h_arr) = highlights {
-                    h_arr
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.trim())
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                } else {
-                    String::new()
-                }
-            });
+        let snippet = summary.or(text).map(|s| s.to_string()).unwrap_or_else(|| {
+            if let Some(h_arr) = highlights {
+                h_arr
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                String::new()
+            }
+        });
 
         let source = Url::parse(url)
             .ok()

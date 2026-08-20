@@ -1,6 +1,6 @@
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::budget::enforce_output_budget;
@@ -44,9 +44,21 @@ pub async fn read_sources(results: Vec<Value>, max_chars: usize) -> Vec<Value> {
 
     let mut futs = Vec::new();
     for r in results {
-        let url = r.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let title = r.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let snippet = r.get("snippet").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let url = r
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let title = r
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let snippet = r
+            .get("snippet")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         futs.push(async move {
             match fetch_provider("auto", &url, per_source).await {
@@ -90,7 +102,13 @@ pub async fn search_and_fetch(args: &HashMap<String, Value>) -> Result<Value, St
 
     if is_torrent_query(raw_query) {
         let mut t_args = args.clone();
-        t_args.insert("max_results".to_string(), json!(args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(4)));
+        t_args.insert(
+            "max_results".to_string(),
+            json!(args
+                .get("max_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(4)),
+        );
         t_args.remove("fetch_results");
         t_args.remove("max_chars");
         t_args.remove("domain");
@@ -101,7 +119,10 @@ pub async fn search_and_fetch(args: &HashMap<String, Value>) -> Result<Value, St
     let provider = match args.get("provider").and_then(|v| v.as_str()) {
         Some(p) => {
             if !SEARCH_PROVIDERS.contains(&p) {
-                return Err(format!("provider must be one of: {}", SEARCH_PROVIDERS.join(", ")));
+                return Err(format!(
+                    "provider must be one of: {}",
+                    SEARCH_PROVIDERS.join(", ")
+                ));
             }
             p
         }

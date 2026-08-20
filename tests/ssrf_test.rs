@@ -1,5 +1,5 @@
-use std::net::IpAddr;
 use lookup::net::ssrf::{is_global_ip, validate_url};
+use std::net::IpAddr;
 
 #[test]
 fn test_private_ip_detection() {

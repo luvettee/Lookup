@@ -49,6 +49,94 @@ pub const MAX_SCREENSHOT_WIDTH: u32 = 1920;
 pub const MAX_SCREENSHOT_HEIGHT: u32 = 1080;
 pub const CHROMIUM_TIMEOUT: Duration = Duration::from_secs(15);
 
+#[derive(Debug, Clone)]
+pub struct BrowserConfig {
+    pub enabled: bool,
+    pub path: Option<PathBuf>,
+    pub debug_url: Option<String>,
+    pub headless: bool,
+    pub max_tabs: usize,
+    pub action_timeout: Duration,
+    pub navigation_timeout: Duration,
+    pub startup_timeout: Duration,
+    pub max_snapshot_elements: usize,
+    pub max_response_chars: usize,
+    pub max_javascript_chars: usize,
+}
+
+impl BrowserConfig {
+    pub fn from_env() -> Self {
+        Self {
+            enabled: env_bool("LOOKUP_BROWSER_ENABLED", false),
+            path: get_env_trimmed("LOOKUP_BROWSER_PATH").map(PathBuf::from),
+            debug_url: get_env_trimmed("LOOKUP_BROWSER_DEBUG_URL"),
+            headless: env_bool("LOOKUP_BROWSER_HEADLESS", true),
+            max_tabs: env_usize("LOOKUP_BROWSER_MAX_TABS", 8, 1, 32),
+            action_timeout: Duration::from_millis(env_u64(
+                "LOOKUP_BROWSER_ACTION_TIMEOUT_MS",
+                5_000,
+                100,
+                30_000,
+            )),
+            navigation_timeout: Duration::from_millis(env_u64(
+                "LOOKUP_BROWSER_NAVIGATION_TIMEOUT_MS",
+                15_000,
+                500,
+                60_000,
+            )),
+            startup_timeout: Duration::from_millis(env_u64(
+                "LOOKUP_BROWSER_STARTUP_TIMEOUT_MS",
+                10_000,
+                500,
+                30_000,
+            )),
+            max_snapshot_elements: env_usize(
+                "LOOKUP_BROWSER_MAX_SNAPSHOT_ELEMENTS",
+                200,
+                10,
+                1_000,
+            ),
+            max_response_chars: env_usize(
+                "LOOKUP_BROWSER_MAX_RESPONSE_CHARS",
+                20_000,
+                1_000,
+                100_000,
+            ),
+            max_javascript_chars: env_usize(
+                "LOOKUP_BROWSER_MAX_JAVASCRIPT_CHARS",
+                16_000,
+                500,
+                100_000,
+            ),
+        }
+    }
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    get_env_trimmed(name)
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn env_u64(name: &str, default: u64, minimum: u64, maximum: u64) -> u64 {
+    get_env_trimmed(name)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default)
+        .clamp(minimum, maximum)
+}
+
+fn env_usize(name: &str, default: usize, minimum: usize, maximum: usize) -> usize {
+    get_env_trimmed(name)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
+        .clamp(minimum, maximum)
+}
+
 pub const WEB_ACTIVITY_WINDOW: Duration = Duration::from_secs(60);
 pub const MAX_WEB_ACTIVITY: usize = 5;
 pub const MAX_SIMILAR_WEB_ACTIVITY: usize = 2;
@@ -78,12 +166,19 @@ pub fn allow_private_urls() -> bool {
 }
 
 pub fn get_env_trimmed(name: &str) -> Option<String> {
-    env::var(name).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    env::var(name)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 pub fn cache_db_path() -> Option<PathBuf> {
     match get_env_trimmed("LOOKUP_CACHE_DB") {
-        Some(value) if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("memory") => None,
+        Some(value)
+            if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("memory") =>
+        {
+            None
+        }
         Some(value) => Some(PathBuf::from(value)),
         None => Some(PathBuf::from(".lookup-cache.sqlite3")),
     }

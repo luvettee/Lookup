@@ -1,8 +1,8 @@
-use std::collections::HashSet;
-use std::sync::LazyLock;
 use regex::Regex;
 use scraper::{Html, Node, Selector};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::LazyLock;
 use url::Url;
 
 use crate::net::normalize_url_key;
@@ -98,8 +98,23 @@ const SKIP_TAGS: &[&str] = &[
     "script", "style", "noscript", "template", "nav", "header", "footer",
 ];
 const BREAK_TAGS: &[&str] = &[
-    "p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "blockquote",
-    "section", "article", "table", "pre", "hr",
+    "p",
+    "div",
+    "br",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "tr",
+    "blockquote",
+    "section",
+    "article",
+    "table",
+    "pre",
+    "hr",
 ];
 const MAX_DOM_DEPTH: usize = 512;
 
@@ -193,8 +208,14 @@ impl PageVisitor {
                     }
 
                     if tag_name == "meta" {
-                        let name = el.attr("name").or_else(|| el.attr("property")).unwrap_or("").to_lowercase();
-                        if (name == "description" || name == "og:description") && self.description.is_empty() {
+                        let name = el
+                            .attr("name")
+                            .or_else(|| el.attr("property"))
+                            .unwrap_or("")
+                            .to_lowercase();
+                        if (name == "description" || name == "og:description")
+                            && self.description.is_empty()
+                        {
                             if let Some(content) = el.attr("content") {
                                 self.description = content.trim().to_string();
                             }
@@ -321,7 +342,8 @@ pub fn parse_html(html_str: &str, base_url: &str, max_chars: usize) -> ParsedPag
 
     // Fallback selectors for title / meta if body traversal misses them
     let title_selector = Selector::parse("title").ok();
-    let meta_desc_selector = Selector::parse("meta[name='description'], meta[property='og:description']").ok();
+    let meta_desc_selector =
+        Selector::parse("meta[name='description'], meta[property='og:description']").ok();
 
     visitor.walk_node(document.root_element(), 0);
     visitor.flush();
