@@ -102,3 +102,20 @@ fn test_cache_lru_and_expiration() {
     let fetched = cache_get(key);
     assert_eq!(fetched, Some(val));
 }
+
+#[tokio::test]
+async fn test_mcp_dispatch_screenshot_url() {
+    let mut args = HashMap::new();
+    args.insert("url".to_string(), json!("https://example.com"));
+    args.insert("width".to_string(), json!(800));
+    args.insert("height".to_string(), json!(600));
+
+    let res = dispatch_tool("screenshot_url", &args).await.unwrap();
+    assert!(res["url"].as_str().unwrap().starts_with("https://example.com"));
+    assert_eq!(res["width"], 800);
+    assert_eq!(res["height"], 600);
+    assert_eq!(res["mime_type"], "image/png");
+    assert!(res["size_bytes"].as_u64().unwrap() > 0);
+    assert!(res["_mcp_image"]["data"].as_str().unwrap().len() > 0);
+}
+

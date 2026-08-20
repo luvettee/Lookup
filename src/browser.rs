@@ -505,6 +505,11 @@ pub async fn screenshot_with_options(url: &str, options: &ScreenshotOptions) -> 
         }
     }
 
+    #[cfg(target_os = "macos")]
+    if let Ok(png) = run_webkit_screenshot(&safe_url, options).await {
+        return Ok(png);
+    }
+
     Err(last_error)
 }
 
@@ -586,3 +591,88 @@ async fn run_pdf(
     }
     Ok(pdf)
 }
+
+#[cfg(target_os = "macos")]
+const WEBKIT_RUNNER_SCRIPT: &str = r#"import Foundation
+import WebKit
+import AppKit
+
+guard CommandLine.arguments.count > 5, let url = URL(string: CommandLine.arguments[1]) else { exit(1) }
+let (w, h, wait, out) = (Double(CommandLine.arguments[2]) ?? 1280, Double(CommandLine.arguments[3]) ?? 720, Double(CommandLine.arguments[4]) ?? 1000, CommandLine.arguments[5])
+
+class Delegate: NSObject, WKNavigationDelegate {
+    func webView(_ v: WKWebView, didFinish: WKNavigation!) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(wait / 1000.0, 0.2)) {
+            let cfg = WKSnapshotConfiguration()
+            cfg.rect = CGRect(x: 0, y: 0, width: w, height: h)
+            v.takeSnapshot(with: cfg) { img, _ in
+                guard let img = img, let tiff = img.tiffRepresentation, let bmp = NSBitmapImageRep(data: tiff),
+                      let png = bmp.representation(using: .png, properties: [:]) else { exit(1) }
+                try? png.write(to: URL(fileURLWithPath: out))
+                exit(0)
+            }
+        }
+    }
+    func webView(_ v: WKWebView, didFail: WKNavigation!, withError: Error) { exit(1) }
+    func webView(_ v: WKWebView, didFailProvisionalNavigation: WKNavigation!, withError: Error) { exit(1) }
+}
+
+let app = NSApplication.shared
+let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: w, height: h))
+let d = Delegate()
+wv.navigationDelegate = d
+var req = URLRequest(url: url)
+req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+wv.load(req)
+DispatchQueue.main.asyncAfter(deadline: .now() + 25.0) { exit(1) }
+app.run()
+"#;
+
+#[cfg(target_os = "macos")]
+async fn run_webkit_screenshot(
+    url: &str,
+    options: &ScreenshotOptions,
+) -> Result<Vec<u8>, String> {
+    let temp_dir = TempDir::new().map_err(|_| "Could not create screenshot directory".to_string())?;
+    let script_path = temp_dir.path().join("runner.swift");
+    let screenshot_path = temp_dir.path().join("screenshot.png");
+    std::fs::write(&script_path, WEBKIT_RUNNER_SCRIPT).map_err(|_| "Could not write runner".to_string())?;
+
+    let (width, height) = if options.full_page {
+        (options.render.viewport.0, FULL_PAGE_HEIGHT)
+    } else {
+        options.render.viewport
+    };
+    let wait_ms = options.render.wait_after_load.as_millis().max(100).to_string();
+
+    let status = timeout(
+        options.render.timeout,
+        Command::new("swift")
+            .arg(&script_path)
+            .arg(url)
+            .arg(width.to_string())
+            .arg(height.to_string())
+            .arg(wait_ms)
+            .arg(&screenshot_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .status(),
+    )
+    .await
+    .map_err(|_| "WebKit screenshot timed out".to_string())?
+    .map_err(|_| "WebKit screenshot failed".to_string())?;
+
+    if !status.success() {
+        return Err("WebKit failed to capture the page".to_string());
+    }
+
+    let image = std::fs::read(&screenshot_path).map_err(|_| "Could not read WebKit screenshot".to_string())?;
+    if image.is_empty() || image.len() > MAX_SCREENSHOT_BYTES as usize || !options.format.magic_bytes_ok(&image) {
+        return Err("WebKit screenshot is empty or invalid".to_string());
+    }
+    Ok(image)
+}
+
+
